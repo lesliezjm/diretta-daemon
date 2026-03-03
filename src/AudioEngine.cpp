@@ -1868,7 +1868,7 @@ bool AudioEngine::process(size_t samplesNeeded) {
         // Continue processing after seek
     }
 
-    std::lock_guard<std::mutex> lock(m_mutex);
+    std::unique_lock<std::mutex> lock(m_mutex);
     // Double vérification avec mutex
     if (m_state.load() != State::PLAYING) {
         return false;
@@ -1876,6 +1876,7 @@ bool AudioEngine::process(size_t samplesNeeded) {
 
     // Apply pending next URI from UPnP thread
     if (m_pendingNextTrack.load(std::memory_order_acquire)) {
+        std::string oldNextURI = m_nextURI;
         {
             std::lock_guard<std::mutex> pendingLock(m_pendingMutex);
             m_nextURI = m_pendingNextURI;
@@ -1886,17 +1887,38 @@ bool AudioEngine::process(size_t samplesNeeded) {
         m_pendingNextTrack.store(false, std::memory_order_release);
         std::cout << "[AudioEngine] Pending next URI applied (gapless)" << std::endl;
 
+        // If next URI changed while a decoder was already preloaded for the old URI,
+        // discard the stale decoder. Without this, Audirvana's rapid
+        // SetNextAVTransportURI updates leave a mismatched decoder (old track's audio)
+        // paired with the new URI, causing the old track to replay on transition.
+        if (m_nextURI != oldNextURI && m_nextDecoder) {
+            std::cout << "[AudioEngine] Next URI changed, discarding stale preload" << std::endl;
+            m_nextDecoder.reset();
+            m_formatChangePending = false;
+        }
+
+        // Reject next URI if same as currently playing track
+        // Audirvana sometimes sends SetNextAVTransportURI with the current track's URL
+        // before sending the actual next track. Preloading the same URL would cause replay.
+        if (!m_nextURI.empty() && m_nextURI == m_currentURI) {
+            std::cout << "[AudioEngine] Next URI same as current, ignoring" << std::endl;
+            m_nextURI.clear();
+            m_nextMetadata.clear();
+        }
+
         // ANTICIPATED PRELOAD: Start preloading immediately in background thread
         // This opens the HTTP connection NOW instead of waiting for EOF,
         // preventing buffer underruns during gapless transitions.
         if (!m_nextURI.empty() && !m_nextDecoder && !m_preloadRunning.load(std::memory_order_acquire)) {
+            std::cout << "[AudioEngine] Anticipated preload started" << std::endl;
+            std::cout << "[AudioEngine]   next: " << m_nextURI << std::endl;
+            std::cout << "[AudioEngine]   curr: " << m_currentURI << std::endl;
             waitForPreloadThread();
             m_preloadRunning.store(true, std::memory_order_release);
             m_preloadThread = std::thread([this]() {
                 preloadNextTrack();
                 m_preloadRunning.store(false, std::memory_order_release);
             });
-            std::cout << "[AudioEngine] Anticipated preload started" << std::endl;
         }
     }
 
@@ -1943,9 +1965,13 @@ bool AudioEngine::process(size_t samplesNeeded) {
     // With anticipated preload, this should rarely trigger (preload already running/done)
     // Skip if format change already detected - avoids reopening the same URL repeatedly
     if (!m_nextDecoder && !m_nextURI.empty() && !m_formatChangePending && m_currentDecoder->isEOF()) {
-        // Check if preload is already running in background
+        // Release m_mutex before preload operations.
+        // preloadNextTrack() needs m_mutex internally (capture-validate-commit pattern).
+        // waitForPreloadThread() must not hold m_mutex because the preload thread needs it.
+        lock.unlock();
+
         if (m_preloadRunning.load(std::memory_order_acquire)) {
-            // Wait for background preload to complete (non-blocking would be better but complex)
+            // Wait for background preload to complete
             std::cout << "[AudioEngine] EOF reached, waiting for background preload..." << std::endl;
             waitForPreloadThread();
         } else {
@@ -1953,6 +1979,8 @@ bool AudioEngine::process(size_t samplesNeeded) {
             std::cout << "[AudioEngine] EOF flag detected, preloading next track for gapless..." << std::endl;
             preloadNextTrack();
         }
+
+        lock.lock();
     }
 
     if (samplesRead > 0) {
@@ -2102,64 +2130,109 @@ bool AudioEngine::openCurrentTrack() {
 }
 
 bool AudioEngine::preloadNextTrack() {
-    if (m_nextURI.empty()) {
+    // Thread-safe preload using capture-validate-commit pattern.
+    // This function runs in m_preloadThread (background). Meanwhile, the audio
+    // thread (process()) can change m_nextURI at any time under m_mutex.
+    // Without synchronization, a stale preload would produce a decoder for
+    // the wrong track, causing Audirvana track-replay bugs.
+
+    // 1. CAPTURE: Snapshot URI and format info under lock
+    std::string uriToLoad;
+    std::string currentURI;
+    TrackInfo currentInfo;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        uriToLoad = m_nextURI;
+        currentURI = m_currentURI;
+        currentInfo = m_currentTrackInfo;
+    }
+
+    if (uriToLoad.empty()) {
+        return false;
+    }
+
+    // Same as current track? Audirvana sometimes sends SetNextAVTransportURI
+    // with the current track's URL before sending the actual next track.
+    if (uriToLoad == currentURI) {
+        std::cout << "[AudioEngine] Preload rejected (same URI as current track)" << std::endl;
+        std::lock_guard<std::mutex> lock(m_mutex);
+        if (m_nextURI == uriToLoad) {
+            m_nextURI.clear();
+            m_nextMetadata.clear();
+        }
         return false;
     }
 
     DEBUG_LOG("[AudioEngine] Preloading next track for gapless...");
 
-    // Create decoder for next track
-    m_nextDecoder = std::make_unique<AudioDecoder>();
+    // 2. OPEN: Slow network I/O without holding lock
+    auto decoder = std::make_unique<AudioDecoder>();
 
-    if (!m_nextDecoder->open(m_nextURI)) {
+    if (!decoder->open(uriToLoad)) {
         std::cerr << "[AudioEngine] Failed to preload next track" << std::endl;
-        m_nextDecoder.reset();
         return false;
     }
 
-    // Check format compatibility for gapless playback
-    // Format changes require clean stop/start to avoid audio artifacts
-    TrackInfo nextInfo = m_nextDecoder->getTrackInfo();
-    bool formatWillChange = (
-        nextInfo.sampleRate != m_currentTrackInfo.sampleRate ||
-        nextInfo.bitDepth != m_currentTrackInfo.bitDepth ||
-        nextInfo.channels != m_currentTrackInfo.channels ||
-        nextInfo.isDSD != m_currentTrackInfo.isDSD
-    );
+    // 3. VALIDATE + COMMIT: Re-check under lock before storing result
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
 
-    if (formatWillChange) {
-        DEBUG_LOG("[AudioEngine] FORMAT CHANGE DETECTED - Gapless disabled");
-        DEBUG_LOG("[AudioEngine] Current: "
-                  << m_currentTrackInfo.sampleRate << "Hz/"
-                  << m_currentTrackInfo.bitDepth << "bit/"
-                  << m_currentTrackInfo.channels << "ch"
-                  << (m_currentTrackInfo.isDSD ? " (DSD)" : ""));
-        DEBUG_LOG("[AudioEngine] Next: "
-                  << nextInfo.sampleRate << "Hz/"
-                  << nextInfo.bitDepth << "bit/"
-                  << nextInfo.channels << "ch"
-                  << (nextInfo.isDSD ? " (DSD)" : ""));
-        DEBUG_LOG("[AudioEngine] Will use stop/start sequence instead of gapless");
+        // URI changed while we were loading → stale, discard
+        if (m_nextURI != uriToLoad) {
+            std::cout << "[AudioEngine] Preload discarded (URI changed during load)" << std::endl;
+            return false;
+        }
 
-        // Don't keep nextDecoder - force stop/start sequence
-        m_nextDecoder.reset();
+        // Double-check same-URI (m_currentURI may have changed during open)
+        if (uriToLoad == m_currentURI) {
+            std::cout << "[AudioEngine] Preload discarded (same as current track)" << std::endl;
+            m_nextURI.clear();
+            m_nextMetadata.clear();
+            return false;
+        }
 
-        // CRITICAL FIX (v1.0.16): Keep m_nextURI!
-        // Do NOT clear m_nextURI - it will be used for non-gapless transition
-        // The EOF handler will see format change and trigger proper reopen
-        // m_nextURI.clear();     // REMOVED - was causing next track to be lost
-        // m_nextMetadata.clear(); // REMOVED
+        // Check format compatibility for gapless playback
+        // Format changes require clean stop/start to avoid audio artifacts
+        TrackInfo nextInfo = decoder->getTrackInfo();
+        bool formatWillChange = (
+            nextInfo.sampleRate != currentInfo.sampleRate ||
+            nextInfo.bitDepth != currentInfo.bitDepth ||
+            nextInfo.channels != currentInfo.channels ||
+            nextInfo.isDSD != currentInfo.isDSD
+        );
 
-        // Prevent repeated preload attempts from EOF handler.
-        // Without this flag, process() would re-call preloadNextTrack() on every
-        // iteration because !m_nextDecoder && !m_nextURI.empty() stays true.
-        m_formatChangePending = true;
+        if (formatWillChange) {
+            DEBUG_LOG("[AudioEngine] FORMAT CHANGE DETECTED - Gapless disabled");
+            DEBUG_LOG("[AudioEngine] Current: "
+                      << currentInfo.sampleRate << "Hz/"
+                      << currentInfo.bitDepth << "bit/"
+                      << currentInfo.channels << "ch"
+                      << (currentInfo.isDSD ? " (DSD)" : ""));
+            DEBUG_LOG("[AudioEngine] Next: "
+                      << nextInfo.sampleRate << "Hz/"
+                      << nextInfo.bitDepth << "bit/"
+                      << nextInfo.channels << "ch"
+                      << (nextInfo.isDSD ? " (DSD)" : ""));
+            DEBUG_LOG("[AudioEngine] Will use stop/start sequence instead of gapless");
 
-        return false;
+            // Don't keep decoder - force stop/start sequence
+            // CRITICAL FIX (v1.0.16): Keep m_nextURI!
+            // Do NOT clear m_nextURI - it will be used for non-gapless transition
+            // The EOF handler will see format change and trigger proper reopen
+
+            // Prevent repeated preload attempts from EOF handler.
+            // Without this flag, process() would re-call preloadNextTrack() on every
+            // iteration because !m_nextDecoder && !m_nextURI.empty() stays true.
+            m_formatChangePending = true;
+
+            return false;
+        }
+
+        // All checks passed → commit the preloaded decoder
+        m_nextDecoder = std::move(decoder);
     }
 
-    DEBUG_LOG("[AudioEngine] Next track preloaded: "
-              << m_nextDecoder->getTrackInfo().codec);
+    DEBUG_LOG("[AudioEngine] Next track preloaded successfully");
 
     return true;
 }
