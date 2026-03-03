@@ -54,6 +54,7 @@ void statsSignalHandler(int /*signal*/) {
 }
 
 bool g_verbose = false;
+int g_rtPriority = 50;
 LogLevel g_logLevel = LogLevel::INFO;
 
 void logDrainThreadFunc() {
@@ -172,6 +173,13 @@ DirettaRenderer::Config parseArguments(int argc, char* argv[]) {
         else if (arg == "--mtu" && i + 1 < argc) {
             config.mtu = std::atoi(argv[++i]);
         }
+        else if (arg == "--rt-priority" && i + 1 < argc) {
+            g_rtPriority = std::atoi(argv[++i]);
+            if (g_rtPriority < 1 || g_rtPriority > 99) {
+                std::cerr << "Warning: rt-priority should be between 1-99" << std::endl;
+                g_rtPriority = std::max(1, std::min(99, g_rtPriority));
+            }
+        }
         else if (arg == "--help" || arg == "-h") {
             std::cout << "Diretta UPnP Renderer (Simplified Architecture)\n\n"
                       << "Usage: " << argv[0] << " [options]\n\n"
@@ -199,6 +207,7 @@ DirettaRenderer::Config parseArguments(int argc, char* argv[]) {
                       << "  --transfer-mode <mode>     Transfer mode: auto, varmax, varauto, fixauto, random\n"
                       << "  --target-profile-limit <us> Target profile limit time (0=self, default: 200)\n"
                       << "  --mtu <bytes>              MTU override (default: auto-detect)\n"
+                      << "  --rt-priority <1-99>       SCHED_FIFO real-time priority for worker thread (default: 50)\n"
                       << std::endl;
             exit(0);
         }

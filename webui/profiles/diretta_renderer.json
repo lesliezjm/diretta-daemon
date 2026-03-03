@@ -90,6 +90,15 @@
                     "default": "0",
                     "min": 0,
                     "max": 7
+                },
+                {
+                    "key": "RT_PRIORITY",
+                    "type": "number",
+                    "label": "RT Priority (SCHED_FIFO)",
+                    "description": "Real-time priority for the audio worker thread (1-99). Higher = more priority. Default: 50",
+                    "default": "50",
+                    "min": 1,
+                    "max": 99
                 }
             ]
         },

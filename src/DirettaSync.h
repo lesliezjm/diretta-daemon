@@ -105,6 +105,7 @@ extern LogRing* g_logRing;
 #include "LogLevel.h"
 
 extern bool g_verbose;
+extern int g_rtPriority;
 
 #ifdef NOLOG
 // Production build: compile out all verbose logging for zero overhead

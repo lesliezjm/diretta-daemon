@@ -15,12 +15,14 @@
 - Profile-based architecture: reusable for other Diretta projects (slim2diretta)
 - Installable via `install.sh` option 6 or `./install.sh --webui`
 
-**Configurable Process Priority (Nice/IOScheduling):**
-- Process priority settings (`NICE_LEVEL`, `IO_SCHED_CLASS`, `IO_SCHED_PRIORITY`) now configurable via `/etc/default/diretta-renderer`
+**Configurable Process Priority (Nice/IOScheduling/SCHED_FIFO):**
+- Process priority settings (`NICE_LEVEL`, `IO_SCHED_CLASS`, `IO_SCHED_PRIORITY`, `RT_PRIORITY`) now configurable via `/etc/default/diretta-renderer`
+- `RT_PRIORITY` (1-99): SCHED_FIFO real-time priority for the audio worker thread (default: 50, was hardcoded)
+- `--rt-priority <1-99>` CLI argument for direct control
 - Removed hardcoded `Nice=-10` and `IOSchedulingClass=realtime` from the systemd service file
 - Priority is applied by `start-renderer.sh` wrapper script via `nice` and `ionice` commands
 - Adjustable through the web UI under the "Process Priority" group
-- Defaults unchanged: nice -10, realtime I/O class, priority 0
+- Defaults unchanged: nice -10, realtime I/O class, I/O priority 0, RT priority 50
 - Same feature added to slim2diretta with `start-slim2diretta.sh` wrapper script
 
 **Advanced Diretta SDK Settings Exposed via CLI:**

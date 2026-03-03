@@ -1663,7 +1663,7 @@ bool DirettaSync::startSyncWorker() {
     m_workerThread = std::thread([this]() {
         // F1: Elevate worker thread priority for reduced jitter
         // SCHED_FIFO priority 50 (mid-range real-time) - requires root/CAP_SYS_NICE
-        setRealtimePriority(50);
+        setRealtimePriority(g_rtPriority);
 
         while (m_running.load(std::memory_order_acquire)) {
             if (!syncWorker()) {
