@@ -1436,6 +1436,19 @@ setup_webui() {
 
     print_info "Installing web UI..."
 
+    # Clean up old service name (pre-v2.1.0 used "diretta-webui.service")
+    if systemctl is-active --quiet diretta-webui.service 2>/dev/null; then
+        print_info "Stopping old diretta-webui.service..."
+        sudo systemctl stop diretta-webui.service
+    fi
+    if systemctl is-enabled --quiet diretta-webui.service 2>/dev/null; then
+        sudo systemctl disable diretta-webui.service
+    fi
+    if [ -f /etc/systemd/system/diretta-webui.service ]; then
+        sudo rm -f /etc/systemd/system/diretta-webui.service
+        print_info "Removed old diretta-webui.service (renamed to diretta-renderer-webui)"
+    fi
+
     sudo mkdir -p "$WEBUI_DIR"
     sudo cp -r "$WEBUI_SRC/diretta_webui.py" "$WEBUI_DIR/"
     sudo cp -r "$WEBUI_SRC/config_parser.py" "$WEBUI_DIR/"
