@@ -207,6 +207,13 @@ bool DirettaRenderer::start() {
         // Create AudioEngine
         m_audioEngine = std::make_unique<AudioEngine>();
 
+        // Set real-time position callback for accurate GetPositionInfo responses
+        // (bypasses 1s position thread cache - fixes UAPP compatibility)
+        m_upnp->setPositionCallback([this]() -> double {
+            if (m_audioEngine) return m_audioEngine->getPosition();
+            return 0.0;
+        });
+
         //=====================================================================
         // Audio Callback - Simplified
         //=====================================================================
