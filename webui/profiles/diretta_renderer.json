@@ -1,0 +1,178 @@
+{
+    "product_name": "Diretta UPnP Renderer",
+    "service_name": "diretta-renderer",
+    "config_path": "/etc/default/diretta-renderer",
+    "config_type": "shell_vars",
+    "groups": [
+        {
+            "name": "General",
+            "collapsed": false,
+            "settings": [
+                {
+                    "key": "TARGET",
+                    "type": "number",
+                    "label": "Diretta Target",
+                    "description": "Target device index (1 = first detected)",
+                    "default": "1",
+                    "min": 1
+                },
+                {
+                    "key": "PORT",
+                    "type": "number",
+                    "label": "UPnP Port",
+                    "description": "UPnP control port (HTTP server uses port+1)",
+                    "default": "4005",
+                    "min": 1024,
+                    "max": 65535
+                },
+                {
+                    "key": "GAPLESS",
+                    "type": "select",
+                    "label": "Gapless Playback",
+                    "description": "Seamless playback between tracks",
+                    "default": "",
+                    "options": [
+                        {"value": "", "label": "Enabled"},
+                        {"value": "--no-gapless", "label": "Disabled"}
+                    ]
+                },
+                {
+                    "key": "VERBOSE",
+                    "type": "select",
+                    "label": "Log Level",
+                    "description": "Logging verbosity",
+                    "default": "",
+                    "options": [
+                        {"value": "", "label": "Normal"},
+                        {"value": "--verbose", "label": "Verbose (debug)"},
+                        {"value": "--quiet", "label": "Quiet (errors only)"}
+                    ]
+                },
+                {
+                    "key": "NETWORK_INTERFACE",
+                    "type": "text",
+                    "label": "Network Interface",
+                    "description": "Interface name (eth0) or IP address. Empty = auto-detect.",
+                    "default": ""
+                }
+            ]
+        },
+        {
+            "name": "Process Priority",
+            "collapsed": true,
+            "settings": [
+                {
+                    "key": "NICE_LEVEL",
+                    "type": "number",
+                    "label": "Nice Level",
+                    "description": "CPU scheduling priority (-20 = highest, 19 = lowest). Default: -10",
+                    "default": "-10",
+                    "min": -20,
+                    "max": 19
+                },
+                {
+                    "key": "IO_SCHED_CLASS",
+                    "type": "select",
+                    "label": "I/O Scheduling Class",
+                    "description": "I/O priority class for disk and network operations",
+                    "default": "realtime",
+                    "options": [
+                        {"value": "realtime", "label": "Realtime (highest, best for audio)"},
+                        {"value": "best-effort", "label": "Best-effort (standard)"},
+                        {"value": "idle", "label": "Idle (lowest)"}
+                    ]
+                },
+                {
+                    "key": "IO_SCHED_PRIORITY",
+                    "type": "number",
+                    "label": "I/O Priority",
+                    "description": "Priority within I/O class (0 = highest, 7 = lowest). Not used with idle class.",
+                    "default": "0",
+                    "min": 0,
+                    "max": 7
+                },
+                {
+                    "key": "RT_PRIORITY",
+                    "type": "number",
+                    "label": "RT Priority (SCHED_FIFO)",
+                    "description": "Real-time priority for the audio worker thread (1-99). Higher = more priority. Default: 50",
+                    "default": "50",
+                    "min": 1,
+                    "max": 99
+                }
+            ]
+        },
+        {
+            "name": "Diretta SDK (Advanced)",
+            "collapsed": true,
+            "settings": [
+                {
+                    "key": "THREAD_MODE",
+                    "type": "number",
+                    "label": "Thread Mode",
+                    "description": "SDK thread scheduling bitmask: 1=Critical, 2=NoShortSleep, 4=NoSleep4Core, 8=SocketNoBlock, 16=Occupied, 2048=NoSleepForce, 8192=NoJumboFrame",
+                    "default": "",
+                    "min": 0,
+                    "max": 65535
+                },
+                {
+                    "key": "TRANSFER_MODE",
+                    "type": "select",
+                    "label": "Transfer Mode",
+                    "description": "Packet sizing and scheduling strategy",
+                    "default": "",
+                    "options": [
+                        {"value": "", "label": "Auto (default)"},
+                        {"value": "varmax", "label": "VarMax (packets filled to maximum)"},
+                        {"value": "varauto", "label": "VarAuto (adaptive packet timing)"},
+                        {"value": "fixauto", "label": "FixAuto (fixed packet timing)"},
+                        {"value": "random", "label": "Random (use with Cycle Min Time)"}
+                    ]
+                },
+                {
+                    "key": "CYCLE_TIME",
+                    "type": "number",
+                    "label": "Cycle Time (us)",
+                    "description": "Max packet transmission cycle time in microseconds. Empty = auto-calculated.",
+                    "default": "",
+                    "min": 333,
+                    "max": 10000
+                },
+                {
+                    "key": "CYCLE_MIN_TIME",
+                    "type": "number",
+                    "label": "Cycle Min Time (us)",
+                    "description": "Min cycle time in microseconds (random mode only)",
+                    "default": "",
+                    "min": 333,
+                    "max": 10000
+                },
+                {
+                    "key": "INFO_CYCLE",
+                    "type": "number",
+                    "label": "Info Cycle (us)",
+                    "description": "Info packet cycle time in microseconds (default: 100000 = 100ms)",
+                    "default": "",
+                    "min": 1000
+                },
+                {
+                    "key": "TARGET_PROFILE_LIMIT",
+                    "type": "number",
+                    "label": "Target Profile Limit (us)",
+                    "description": "0 = SelfProfile (host-side only), >0 = TargetProfile with auto-adaptation (default: 200)",
+                    "default": "",
+                    "min": 0
+                },
+                {
+                    "key": "MTU_OVERRIDE",
+                    "type": "number",
+                    "label": "MTU Override (bytes)",
+                    "description": "Force specific MTU. Empty = auto-detect. Common values: 1500, 4096, 9000",
+                    "default": "",
+                    "min": 1500,
+                    "max": 16128
+                }
+            ]
+        }
+    ]
+}

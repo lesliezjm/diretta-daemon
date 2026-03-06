@@ -88,18 +88,22 @@ public:
     // Track epoch counter for race condition prevention
     uint32_t getTrackEpoch() const { return m_trackEpoch.load(std::memory_order_acquire); }
     
+    // Real-time position callback (called by GetPositionInfo for accurate position)
+    using PositionCallback = std::function<double()>;
+    void setPositionCallback(PositionCallback cb);
+
     // Getters
     std::string getDeviceURL() const;
     std::string getIPAddress() const;
     int getPort() const;
-    
+
     // State queries (for GetTransportInfo, GetPositionInfo)
     std::string getCurrentState() const;
     std::string getCurrentURI() const;
     std::string getCurrentMetadata() const;
     int getCurrentPosition() const;
     int getTrackDuration() const;
-    
+
     // State setters (from AudioEngine)
     void setCurrentPosition(int seconds);
     void setTrackDuration(int seconds);
@@ -152,6 +156,7 @@ private:
     std::string generateConnectionManagerSCPD();
     std::string createPositionInfoXML() const;
     std::string formatTime(int seconds) const;
+    std::string formatTimePrecise(double seconds) const;
     
     void sendAVTransportEvent();
     void sendRenderingControlEvent();
@@ -202,4 +207,7 @@ private:
     // Track epoch counter (incremented on gapless transition)
     // Used by position thread to detect stale reads
     std::atomic<uint32_t> m_trackEpoch{0};
+
+    // Real-time position callback (bypasses 1s position thread cache)
+    PositionCallback m_positionCallback;
 };

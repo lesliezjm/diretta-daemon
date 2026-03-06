@@ -1,4 +1,4 @@
-# Diretta UPnP Renderer v2.0.6
+# Diretta UPnP Renderer v2.1.0
 
 **The world's first native UPnP/DLNA renderer with Diretta protocol support - Low-Latency Edition**
 
@@ -8,17 +8,18 @@
 
 ---
 
-![Version](https://img.shields.io/badge/version-2.0.6-blue.svg)
+![Version](https://img.shields.io/badge/version-2.1.0-blue.svg)
 ![Low Latency](https://img.shields.io/badge/Latency-Low-green.svg)
 ![SDK](https://img.shields.io/badge/SDK-DIRETTA::Sync-orange.svg)
 ![Audirvana](https://img.shields.io/badge/Audirvana-Compatible-green.svg)
 
 ---
 
-## What's New in v2.0.6
+## What's New in v2.1.0
 
-**Advanced SDK settings, stability & compatibility fixes.**
+**Web Configuration UI, Advanced SDK settings, stability & compatibility fixes.**
 
+- **Web Configuration UI** — Configure the renderer from your browser at `http://<ip>:8080` — no SSH needed. Edit target, port, network interface, gapless mode, and all advanced Diretta SDK settings. Save & Restart in one click. Install via `./install.sh --webui` or menu option 6.
 - **Advanced Diretta SDK settings** — All tuning options from v1.3.3 are back: `--thread-mode`, `--cycle-time`, `--info-cycle`, `--transfer-mode`, `--target-profile-limit`, `--mtu` (see [Command Line Options](#advanced-diretta-sdk-settings) and [docs/CONFIGURATION.md](docs/CONFIGURATION.md))
 - **Automatic config migration** — Upgrading from a previous version? `install.sh` now automatically migrates your settings to the new config file (backup saved as `.bak`)
 - **Stop action fix** (by herisson-88) — uses `stopPlayback()` instead of `close()` on UPnP Stop, keeping the SDK connection open for faster resume and preventing white noise on hi-res transitions (Holo Red and similar targets)
@@ -31,6 +32,7 @@ See [CHANGELOG.md](CHANGELOG.md) for details.
 
 | Version | Highlights |
 |---------|-----------|
+| **v2.0.6** | Advanced SDK settings, config migration, stop fix (herisson-88), libupnp auto-detect |
 | **v2.0.5** | Stop fix for Holo Red (herisson-88), libupnp auto-detection, privilege drop removed |
 | **v2.0.4** | Centralized logging, rebuffering on underrun, ARM NEON SIMD, systemd hardening, unit tests |
 | **v2.0.3** | Audirvana compatibility (UPnP event deduplication), adaptive buffer for remote streaming |
@@ -76,6 +78,7 @@ This renderer uses the **Diretta Host SDK**, which is proprietary software by Yu
 - [System Optimization](#system-optimization)
 - [CPU Tuning](#cpu-isolation--tuning-advanced)
 - [Command Line Options](#command-line-options)
+- [Web Configuration UI](#web-configuration-ui)
 - [Troubleshooting](#troubleshooting)
 - [Documentation](#documentation)
 - [Credits](#credits)
@@ -230,6 +233,27 @@ The renderer automatically detects and optimizes for your CPU:
 
 ## Upgrading
 
+### From v2.0.x to v2.1.0
+
+```bash
+# 1. Stop the service
+sudo systemctl stop diretta-renderer
+
+# 2. Pull the latest version
+cd ~/DirettaRendererUPnP
+git pull
+
+# 3. Re-run the installer (rebuilds, migrates config, reinstalls service)
+./install.sh
+# Select: Full install or Build + Service
+
+# 4. Optionally install the web configuration UI
+./install.sh --webui
+
+# 5. Restart the service
+sudo systemctl start diretta-renderer
+```
+
 ### From v2.0.4/v2.0.5 to v2.0.6
 
 The configuration file has changed significantly in v2.0.6 (new SDK settings, removed options). The installer **automatically migrates your settings**:
@@ -257,7 +281,7 @@ sudo systemctl start diretta-renderer
 - Obsolete settings (e.g., `DROP_USER`) are detected and skipped with a warning
 - New advanced SDK settings appear commented with their default values, ready to customize
 
-> **Tip:** After upgrading, review the new options in `/opt/diretta-renderer-upnp/diretta-renderer.conf` — the advanced Diretta SDK settings section allows fine-tuning of thread priority, transfer mode, and timing parameters.
+> **Tip:** After upgrading, review the new options in `/etc/default/diretta-renderer` — the advanced Diretta SDK settings section allows fine-tuning of thread priority, transfer mode, and timing parameters.
 
 ### From v1.x (clean install required)
 
@@ -346,6 +370,7 @@ The installer provides an interactive menu with options for:
 - Installing as a systemd service
 - Configuring automatic startup
 - Setting up the Diretta target
+- Installing the web configuration UI
 
 ### 4. Configure Network (Recommended)
 
@@ -595,7 +620,7 @@ These options allow fine-tuning the Diretta SDK transmission behavior. **Leave a
 --cycle-min-time <us>       Min cycle time in microseconds (random mode only)
 --info-cycle <us>           Info packet cycle in microseconds (default: 100000)
 --transfer-mode <mode>      Transfer mode: auto, varmax, varauto, fixauto, random
---target-profile-limit <us> Target profile limit (0=SelfProfile, default: 200)
+--target-profile-limit <us> Target profile limit (0=SelfProfile (stable), default: 0, >0=experimental)
 --mtu <bytes>               MTU override (default: auto-detect)
 ```
 
@@ -622,6 +647,44 @@ sudo ./bin/DirettaRendererUPnP --target 1 --interface eth0
 # Advanced: Custom thread mode and transfer mode
 sudo ./bin/DirettaRendererUPnP --target 1 --thread-mode 17 --transfer-mode fixauto
 ```
+
+---
+
+## Web Configuration UI
+
+Configure the renderer from your browser — no SSH or manual file editing needed.
+
+### Installation
+
+```bash
+# Via installer menu (option 6)
+./install.sh
+
+# Or directly via command line
+./install.sh --webui
+```
+
+### Usage
+
+Once installed, access the web UI at:
+```
+http://<your-ip>:8080
+```
+
+**Features:**
+- Edit all renderer settings (target, port, name, gapless, verbose, network interface)
+- Advanced Diretta SDK settings (thread-mode, transfer-mode, cycle-time, etc.)
+- **Save & Restart** — applies settings and restarts the service in one click
+- **Restart Only** — restart the service without changing settings
+
+**Service management:**
+```bash
+sudo systemctl status diretta-renderer-webui
+sudo systemctl stop diretta-renderer-webui
+sudo systemctl restart diretta-renderer-webui
+```
+
+> **Note:** The web UI runs as a separate Python process (`diretta-renderer-webui.service`) and has zero impact on audio quality or latency.
 
 ---
 
@@ -728,4 +791,4 @@ This software is provided "as is" without warranty. While designed for high-qual
 
 **Enjoy bit-perfect, low-latency audio streaming!**
 
-*Last updated: 2026-02-28 (v2.0.6)*
+*Last updated: 2026-03-03 (v2.1.0)*

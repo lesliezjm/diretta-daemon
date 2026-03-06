@@ -14,7 +14,7 @@
 #include <chrono>
 #include <iomanip>
 
-#define RENDERER_VERSION "2.0.6"
+#define RENDERER_VERSION "2.1.0"
 #define RENDERER_BUILD_DATE __DATE__
 #define RENDERER_BUILD_TIME __TIME__
 
@@ -54,6 +54,7 @@ void statsSignalHandler(int /*signal*/) {
 }
 
 bool g_verbose = false;
+int g_rtPriority = 50;
 LogLevel g_logLevel = LogLevel::INFO;
 
 void logDrainThreadFunc() {
@@ -172,6 +173,13 @@ DirettaRenderer::Config parseArguments(int argc, char* argv[]) {
         else if (arg == "--mtu" && i + 1 < argc) {
             config.mtu = std::atoi(argv[++i]);
         }
+        else if (arg == "--rt-priority" && i + 1 < argc) {
+            g_rtPriority = std::atoi(argv[++i]);
+            if (g_rtPriority < 1 || g_rtPriority > 99) {
+                std::cerr << "Warning: rt-priority should be between 1-99" << std::endl;
+                g_rtPriority = std::max(1, std::min(99, g_rtPriority));
+            }
+        }
         else if (arg == "--help" || arg == "-h") {
             std::cout << "Diretta UPnP Renderer (Simplified Architecture)\n\n"
                       << "Usage: " << argv[0] << " [options]\n\n"
@@ -197,8 +205,9 @@ DirettaRenderer::Config parseArguments(int argc, char* argv[]) {
                       << "  --cycle-min-time <us>      Min cycle time in microseconds (random mode only)\n"
                       << "  --info-cycle <us>          Info packet cycle in microseconds (default: 100000)\n"
                       << "  --transfer-mode <mode>     Transfer mode: auto, varmax, varauto, fixauto, random\n"
-                      << "  --target-profile-limit <us> Target profile limit time (0=self, default: 200)\n"
+                      << "  --target-profile-limit <us> Target profile limit time (0=SelfProfile (stable), default: 0, >0=experimental)\n"
                       << "  --mtu <bytes>              MTU override (default: auto-detect)\n"
+                      << "  --rt-priority <1-99>       SCHED_FIFO real-time priority for worker thread (default: 50)\n"
                       << std::endl;
             exit(0);
         }

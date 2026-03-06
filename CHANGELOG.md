@@ -1,8 +1,29 @@
 # Changelog
 
-## [2.0.6] - Unreleased
+## [2.1.0] - 2026-03-03
 
 ### ✨ New Features
+
+**Web Configuration UI (diretta-webui):**
+- Browser-based settings interface — no SSH needed to configure the renderer
+- Accessible at `http://<ip>:8080` via a lightweight Python HTTP server
+- Edit all renderer settings: target, port, gapless, verbose, network interface
+- Advanced Diretta SDK settings: thread-mode, transfer-mode, cycle-time, info-cycle, target-profile-limit, MTU
+- Save & Restart: applies settings and restarts the systemd service in one click
+- Zero dependencies beyond Python 3 (stdlib only)
+- Separate systemd service (`diretta-renderer-webui.service`) — transparent for audio quality
+- Profile-based architecture: reusable for other Diretta projects (slim2diretta)
+- Installable via `install.sh` option 6 or `./install.sh --webui`
+
+**Configurable Process Priority (Nice/IOScheduling/SCHED_FIFO):**
+- Process priority settings (`NICE_LEVEL`, `IO_SCHED_CLASS`, `IO_SCHED_PRIORITY`, `RT_PRIORITY`) now configurable via `/etc/default/diretta-renderer`
+- `RT_PRIORITY` (1-99): SCHED_FIFO real-time priority for the audio worker thread (default: 50, was hardcoded)
+- `--rt-priority <1-99>` CLI argument for direct control
+- Removed hardcoded `Nice=-10` and `IOSchedulingClass=realtime` from the systemd service file
+- Priority is applied by `start-renderer.sh` wrapper script via `nice` and `ionice` commands
+- Adjustable through the web UI under the "Process Priority" group
+- Defaults unchanged: nice -10, realtime I/O class, I/O priority 0, RT priority 50
+- Same feature added to slim2diretta with `start-slim2diretta.sh` wrapper script
 
 **Advanced Diretta SDK Settings Exposed via CLI:**
 - `--thread-mode <mode>`: SDK thread mode bitmask (CRITICAL, NOSHORTSLEEP, SOCKETNOBLOCK, OCCUPIED, etc.)
@@ -10,20 +31,41 @@
 - `--cycle-min-time <us>`: Min cycle time in microseconds (random mode only)
 - `--info-cycle <us>`: Info packet cycle time (default: 100000µs = 100ms)
 - `--transfer-mode <mode>`: Transfer mode (auto, varmax, varauto, fixauto, random)
-- `--target-profile-limit <us>`: Target profile limit time (0=SelfProfile, default: 200=TargetProfile with auto-adaptation)
+- `--target-profile-limit <us>`: Target profile limit time (0=SelfProfile (stable), default: 0, >0=TargetProfile with auto-adaptation (experimental))
 - `--mtu <bytes>`: MTU override (skip auto-detection)
 - These options were available in v1.3.3 and have been reintroduced with the new DirettaSync architecture
 - TargetProfile mode uses SDK `getProfileMaker()` for target-adaptive transmission profiles
 - Refactored SDK `open()` calls into a single `openSDK()` helper to eliminate code duplication
 
+**Configuration File Moved to `/etc/default/diretta-renderer`:**
+- Config file relocated from `/opt/diretta-renderer-upnp/diretta-renderer.conf` to `/etc/default/diretta-renderer`
+- Follows standard Linux convention (`/etc/default/` for service configuration)
+- Fixes `Read-only file system` error on machines with read-only `/opt` partition
+- Existing installations are automatically migrated: old config backed up, settings preserved
+- Web UI can now save settings on all system configurations
+
 **Automatic Configuration Migration on Upgrade:**
-- When upgrading, `install.sh` now automatically migrates your settings from the old `diretta-renderer.conf` to the new template
+- When upgrading, `install.sh` automatically migrates settings from old location to `/etc/default/diretta-renderer`
 - Old config is backed up as `diretta-renderer.conf.bak`
 - User settings (TARGET, PORT, NETWORK_INTERFACE, etc.) are preserved and applied to the new file
 - New options (SDK settings) appear with their default values, ready to customize
 - Obsolete settings (e.g., `DROP_USER` from v2.0.5) are detected and reported
 
 ### 🐛 Bug Fixes
+
+**UAPP (USB Audio Player Pro) Position Tracking Compatibility:**
+- GetPositionInfo now returns real-time position with sub-second precision (`HH:MM:SS.FFF`)
+- Previously returned `00:00:00` on first poll because position thread (1s update interval) hadn't updated yet
+- UAPP polls only once and stopped tracking position when it received `00:00:00`
+- Position is now computed directly from AudioEngine via callback, bypassing the cached value
+
+**Audirvana Gapless Track Replay Fix (PR #60 by herisson-88):**
+- Fixed race condition in `onSetURI` where split mutex lock allowed `onPlay` to read stale URI between auto-stop and URI update — Audirvana sends commands on separate HTTP connections, triggering the race consistently
+- Rewrote `preloadNextTrack()` with thread-safe capture-validate-commit pattern: snapshot URI under lock, open decoder without lock, revalidate before commit
+- Added stale preload detection: discards decoder when `m_nextURI` changes during loading
+- Rejects same-URI `SetNextAVTransportURI` (Audirvana quirk that caused previous track replay)
+- Added `onPlay` already-playing guard per UPnP AVTransport spec
+- Syncs `DirettaRenderer::m_currentURI` during gapless transitions via `trackChangeCallback`
 
 **Stop Action Uses stopPlayback() Instead of close() (fix by herisson-88):**
 - Changed UPnP Stop handler from `close()` to `stopPlayback(false)` in DirettaSync

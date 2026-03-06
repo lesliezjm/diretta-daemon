@@ -7,7 +7,7 @@ set -e
 
 INSTALL_DIR="/opt/diretta-renderer-upnp"
 SERVICE_FILE="/etc/systemd/system/diretta-renderer.service"
-CONFIG_FILE="$INSTALL_DIR/diretta-renderer.conf"
+CONFIG_FILE="/etc/default/diretta-renderer"
 WRAPPER_SCRIPT="$INSTALL_DIR/start-renderer.sh"
 
 echo "════════════════════════════════════════════════════════"

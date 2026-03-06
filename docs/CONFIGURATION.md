@@ -174,18 +174,18 @@ sudo ./DirettaRendererUPnP --target 1 --transfer-mode fixauto
 ```
 
 #### `--target-profile-limit <microseconds>`
-**Default**: 200
+**Default**: 0
 **Description**: Controls how the SDK manages transmission profiles.
-- `0` = **SelfProfile**: the renderer manages its own profile directly
-- `>0` = **TargetProfile**: the SDK auto-adapts the profile based on the target device capabilities, with the specified value as the minimum cycle time limit. Under high system load, the SDK automatically falls back to lighter processing.
+- `0` = **SelfProfile** (stable, default): the renderer manages its own profile directly
+- `>0` = **TargetProfile** (experimental): the SDK auto-adapts the profile based on the target device capabilities, with the specified value as the minimum cycle time limit. Under high system load, the SDK automatically falls back to lighter processing.
 
 **Example**:
 ```bash
-# Use TargetProfile with 200µs limit (default)
-sudo ./DirettaRendererUPnP --target 1 --target-profile-limit 200
-
-# Use SelfProfile (direct control)
+# Use SelfProfile (stable, default)
 sudo ./DirettaRendererUPnP --target 1 --target-profile-limit 0
+
+# Use TargetProfile with 200µs limit (experimental)
+sudo ./DirettaRendererUPnP --target 1 --target-profile-limit 200
 ```
 
 #### `--mtu <bytes>`
@@ -401,15 +401,16 @@ echo 1 | sudo tee /proc/irq/16/smp_affinity
 
 #### 3. Process Priority
 
-The audio thread runs with real-time priority automatically.
+The audio worker thread runs with SCHED_FIFO real-time priority (50) automatically.
 
-Manual adjustment (systemd service):
-```ini
-[Service]
-Nice=-10
-CPUSchedulingPolicy=fifo
-CPUSchedulingPriority=80
+Process-level nice and I/O scheduling are configurable in `/etc/default/diretta-renderer`:
+```bash
+NICE_LEVEL=-10              # -20 (highest) to 19 (lowest)
+IO_SCHED_CLASS=realtime     # realtime, best-effort, idle
+IO_SCHED_PRIORITY=0         # 0 (highest) to 7 (lowest)
 ```
+
+These settings are also adjustable through the web UI under "Process Priority".
 
 ### Audio-Specific Tuning
 

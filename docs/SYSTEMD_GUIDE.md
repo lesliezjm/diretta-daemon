@@ -35,7 +35,7 @@ sudo systemctl status diretta-renderer
 | File | Location | Purpose |
 |------|----------|---------|
 | **Binary** | `/opt/diretta-renderer-upnp/DirettaRendererUPnP` | The renderer executable |
-| **Config** | `/opt/diretta-renderer-upnp/diretta-renderer.conf` | Service configuration |
+| **Config** | `/etc/default/diretta-renderer` | Service configuration |
 | **Service** | `/etc/systemd/system/diretta-renderer.service` | Systemd unit file |
 
 ---
@@ -45,7 +45,7 @@ sudo systemctl status diretta-renderer
 ### Edit Configuration
 
 ```bash
-sudo nano /opt/diretta-renderer-upnp/diretta-renderer.conf
+sudo nano /etc/default/diretta-renderer
 ```
 
 ### Available Options
@@ -173,7 +173,7 @@ Wants=network-online.target
 Type=simple
 User=root                          # Start as root for network init
 WorkingDirectory=/opt/diretta-renderer-upnp
-EnvironmentFile=-/opt/diretta-renderer-upnp/diretta-renderer.conf
+EnvironmentFile=-/etc/default/diretta-renderer
 ExecStart=/opt/diretta-renderer-upnp/start-renderer.sh
 
 Restart=on-failure
@@ -215,15 +215,14 @@ SystemCallArchitectures=native
 SystemCallFilter=~@mount @keyring @debug @module @swap @reboot @obsolete
 
 # Performance
-Nice=-10
-IOSchedulingClass=realtime
-IOSchedulingPriority=0
+# Nice and IOScheduling are now configurable via /etc/default/diretta-renderer
+# (NICE_LEVEL, IO_SCHED_CLASS, IO_SCHED_PRIORITY) and applied by start-renderer.sh
 
 [Install]
 WantedBy=multi-user.target
 ```
 
-The service runs as root to ensure full access to raw sockets (Diretta protocol) and real-time thread priorities (SCHED_FIFO). The `CapabilityBoundingSet` restricts the process to only the capabilities it needs: `CAP_NET_RAW`/`CAP_NET_ADMIN` for network operations and `CAP_SYS_NICE` for real-time scheduling. The filesystem and kernel hardening directives provide security isolation without impacting audio performance.
+The service runs as root to ensure full access to raw sockets (Diretta protocol) and real-time thread priorities (SCHED_FIFO). The `CapabilityBoundingSet` restricts the process to only the capabilities it needs: `CAP_NET_RAW`/`CAP_NET_ADMIN` for network operations and `CAP_SYS_NICE` for real-time scheduling. Process priority (nice level and I/O scheduling) is configurable via `/etc/default/diretta-renderer` and applied by the startup wrapper script.
 
 ---
 
@@ -233,7 +232,7 @@ The service runs as root to ensure full access to raw sockets (Diretta protocol)
 
 ```bash
 # Edit config
-sudo nano /opt/diretta-renderer-upnp/diretta-renderer.conf
+sudo nano /etc/default/diretta-renderer
 # Change: PORT=4006
 
 # Restart service
@@ -334,11 +333,11 @@ sudo cp /etc/systemd/system/diretta-renderer.service \
         /etc/systemd/system/diretta-renderer-2.service
 
 # Create second config
-sudo cp /opt/diretta-renderer-upnp/diretta-renderer.conf \
-        /opt/diretta-renderer-upnp/diretta-renderer-2.conf
+sudo cp /etc/default/diretta-renderer \
+        /etc/default/diretta-renderer-2
 
 # Edit second config with different port
-sudo nano /opt/diretta-renderer-upnp/diretta-renderer-2.conf
+sudo nano /etc/default/diretta-renderer-2
 # Set: PORT=4006, TARGET=2
 
 # Edit second service to use second config
@@ -353,21 +352,27 @@ sudo systemctl start diretta-renderer-2
 
 ### Performance Tuning (Optional)
 
-Add to service file under `[Service]`:
+Process priority is configurable in `/etc/default/diretta-renderer`:
+
+```bash
+# CPU scheduling priority (-20 = highest, 19 = lowest)
+NICE_LEVEL=-10
+
+# I/O scheduling: realtime, best-effort, idle
+IO_SCHED_CLASS=realtime
+IO_SCHED_PRIORITY=0
+```
+
+These settings can also be adjusted through the web UI under "Process Priority".
+
+For CPU affinity (pinning to specific cores), add to the service file:
 
 ```ini
-# Higher priority (use with caution)
-Nice=-10
-
-# Real-time I/O scheduling
-IOSchedulingClass=realtime
-IOSchedulingPriority=0
-
-# CPU affinity (pin to specific cores)
+[Service]
 CPUAffinity=0 1
 ```
 
-**Warning:** These settings may affect system stability. Test thoroughly!
+**Warning:** Extreme priority settings may affect system stability. Test thoroughly!
 
 ---
 

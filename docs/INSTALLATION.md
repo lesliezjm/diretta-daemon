@@ -209,7 +209,7 @@ sudo ./install-systemd.sh
 
 #Next steps:
  1. Edit configuration (optional):
-     sudo nano /opt/diretta-renderer-upnp/diretta-renderer.conf
+     sudo nano /etc/default/diretta-renderer
  2. Reload daemon:
      sudo systemctl daemon-reload
  3. Enable the service:

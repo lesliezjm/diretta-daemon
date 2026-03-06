@@ -1077,7 +1077,8 @@ setup_systemd_service() {
 
     local INSTALL_DIR="/opt/diretta-renderer-upnp"
     local SERVICE_FILE="/etc/systemd/system/diretta-renderer.service"
-    local CONFIG_FILE="$INSTALL_DIR/diretta-renderer.conf"
+    local CONFIG_FILE="/etc/default/diretta-renderer"
+    local OLD_CONFIG_FILE="$INSTALL_DIR/diretta-renderer.conf"
     local WRAPPER_SCRIPT="$INSTALL_DIR/start-renderer.sh"
     local BINARY_PATH="$SCRIPT_DIR/bin/DirettaRendererUPnP"
     local SYSTEMD_DIR="$SCRIPT_DIR/systemd"
@@ -1131,6 +1132,12 @@ INFO_CYCLE="${INFO_CYCLE:-}"
 TRANSFER_MODE="${TRANSFER_MODE:-}"
 TARGET_PROFILE_LIMIT="${TARGET_PROFILE_LIMIT:-}"
 MTU_OVERRIDE="${MTU_OVERRIDE:-}"
+
+# Process priority defaults
+NICE_LEVEL="${NICE_LEVEL:--10}"
+IO_SCHED_CLASS="${IO_SCHED_CLASS:-realtime}"
+IO_SCHED_PRIORITY="${IO_SCHED_PRIORITY:-0}"
+RT_PRIORITY="${RT_PRIORITY:-50}"
 
 RENDERER_BIN="/opt/diretta-renderer-upnp/DirettaRendererUPnP"
 
@@ -1196,36 +1203,78 @@ if [ -n "$MTU_OVERRIDE" ]; then
     CMD="$CMD --mtu $MTU_OVERRIDE"
 fi
 
+if [ -n "$RT_PRIORITY" ] && [ "$RT_PRIORITY" != "50" ]; then
+    CMD="$CMD --rt-priority $RT_PRIORITY"
+fi
+
+# Build exec prefix for process priority
+EXEC_PREFIX=""
+
+if [ -n "$NICE_LEVEL" ] && [ "$NICE_LEVEL" != "0" ]; then
+    EXEC_PREFIX="nice -n $NICE_LEVEL"
+fi
+
+if [ -n "$IO_SCHED_CLASS" ]; then
+    case "$IO_SCHED_CLASS" in
+        realtime|1)  IONICE_CLASS=1 ;;
+        best-effort|2) IONICE_CLASS=2 ;;
+        idle|3)      IONICE_CLASS=3 ;;
+        *)           IONICE_CLASS="" ;;
+    esac
+    if [ -n "$IONICE_CLASS" ]; then
+        if [ "$IONICE_CLASS" = "3" ]; then
+            EXEC_PREFIX="ionice -c $IONICE_CLASS $EXEC_PREFIX"
+        else
+            EXEC_PREFIX="ionice -c $IONICE_CLASS -n ${IO_SCHED_PRIORITY:-0} $EXEC_PREFIX"
+        fi
+    fi
+fi
+
 # Log the command being executed
 echo "════════════════════════════════════════════════════════"
 echo "  Starting Diretta UPnP Renderer"
 echo "════════════════════════════════════════════════════════"
 echo ""
 echo "Configuration:"
-echo "  Target:           $TARGET"
+echo "  Target:            $TARGET"
 echo "  Network Interface: ${NETWORK_INTERFACE:-auto-detect}"
+echo "  Nice level:        $NICE_LEVEL"
+echo "  I/O scheduling:    $IO_SCHED_CLASS (priority $IO_SCHED_PRIORITY)"
+echo "  RT priority:       $RT_PRIORITY (SCHED_FIFO)"
 echo ""
 echo "Command:"
-echo "  $CMD"
+echo "  $EXEC_PREFIX $CMD"
 echo ""
 echo "════════════════════════════════════════════════════════"
 echo ""
 
-# Execute
-exec $CMD
+# Execute with priority settings
+exec $EXEC_PREFIX $CMD
 WRAPPER_EOF
         sudo chmod +x "$WRAPPER_SCRIPT"
         print_success "Wrapper script created: $WRAPPER_SCRIPT"
     fi
 
     print_info "4. Installing configuration file..."
+
+    # Determine the source of existing settings (new or old path)
+    local EXISTING_CONFIG=""
     if [ -f "$CONFIG_FILE" ]; then
+        EXISTING_CONFIG="$CONFIG_FILE"
+    elif [ -f "$OLD_CONFIG_FILE" ]; then
+        # Migrate from old location (/opt/diretta-renderer-upnp/diretta-renderer.conf)
+        EXISTING_CONFIG="$OLD_CONFIG_FILE"
+        print_info "Found config at old location: $OLD_CONFIG_FILE"
+        print_info "Migrating to new location: $CONFIG_FILE"
+    fi
+
+    if [ -n "$EXISTING_CONFIG" ]; then
         # ---- Upgrade: migrate old settings to new config template ----
         print_info "Existing configuration found, upgrading..."
 
         # Backup old config
-        local BACKUP_FILE="$CONFIG_FILE.bak"
-        sudo cp "$CONFIG_FILE" "$BACKUP_FILE"
+        local BACKUP_FILE="${EXISTING_CONFIG}.bak"
+        sudo cp "$EXISTING_CONFIG" "$BACKUP_FILE"
         print_success "Old config backed up to: $BACKUP_FILE"
 
         # Install new config template
@@ -1239,8 +1288,7 @@ WRAPPER_EOF
         fi
 
         # Migrate settings from old config
-        # Known keys in v2.0.6 (all others are considered obsolete)
-        local KNOWN_KEYS="TARGET PORT GAPLESS VERBOSE NETWORK_INTERFACE THREAD_MODE CYCLE_TIME CYCLE_MIN_TIME INFO_CYCLE TRANSFER_MODE TARGET_PROFILE_LIMIT MTU_OVERRIDE"
+        local KNOWN_KEYS="TARGET PORT GAPLESS VERBOSE NETWORK_INTERFACE THREAD_MODE CYCLE_TIME CYCLE_MIN_TIME INFO_CYCLE TRANSFER_MODE TARGET_PROFILE_LIMIT MTU_OVERRIDE NICE_LEVEL IO_SCHED_CLASS IO_SCHED_PRIORITY RT_PRIORITY"
         local migrated_keys=""
         local obsolete_keys=""
 
@@ -1273,8 +1321,14 @@ WRAPPER_EOF
         if [ -n "$obsolete_keys" ]; then
             print_warning "Obsolete settings skipped (no longer used):$obsolete_keys"
         fi
-        print_success "Configuration upgraded: $CONFIG_FILE"
+        print_success "Configuration installed: $CONFIG_FILE"
         print_info "Old config saved as: $BACKUP_FILE"
+
+        # Remove old config from /opt if migrated from there
+        if [ "$EXISTING_CONFIG" = "$OLD_CONFIG_FILE" ]; then
+            sudo rm -f "$OLD_CONFIG_FILE"
+            print_info "Removed old config from: $OLD_CONFIG_FILE"
+        fi
     else
         # ---- Fresh install ----
         if [ -f "$SYSTEMD_DIR/diretta-renderer.conf" ]; then
@@ -1299,7 +1353,7 @@ Wants=network-online.target
 Type=simple
 User=root
 WorkingDirectory=/opt/diretta-renderer-upnp
-EnvironmentFile=-/opt/diretta-renderer-upnp/diretta-renderer.conf
+EnvironmentFile=-/etc/default/diretta-renderer
 ExecStart=/opt/diretta-renderer-upnp/start-renderer.sh
 
 # Restart policy
@@ -1347,9 +1401,8 @@ SystemCallArchitectures=native
 SystemCallFilter=~@mount @keyring @debug @module @swap @reboot @obsolete
 
 # --- Performance ---
-Nice=-10
-IOSchedulingClass=realtime
-IOSchedulingPriority=0
+# Nice and IOScheduling are configurable via /etc/default/diretta-renderer
+# (NICE_LEVEL, IO_SCHED_CLASS, IO_SCHED_PRIORITY) and applied by start-renderer.sh
 
 [Install]
 WantedBy=multi-user.target
@@ -1382,6 +1435,106 @@ SERVICE_EOF
     echo ""
     echo "    4. View logs:"
     echo "       sudo journalctl -u diretta-renderer -f"
+    echo ""
+
+    # Offer web UI installation
+    setup_webui
+}
+
+# =============================================================================
+# WEB CONFIGURATION UI
+# =============================================================================
+
+setup_webui() {
+    local INSTALL_DIR="/opt/diretta-renderer-upnp"
+    local WEBUI_DIR="$INSTALL_DIR/webui"
+    local WEBUI_SERVICE_FILE="/etc/systemd/system/diretta-renderer-webui.service"
+    local WEBUI_SRC="$SCRIPT_DIR/webui"
+
+    if [ ! -d "$WEBUI_SRC" ]; then
+        print_info "Web UI source not found, skipping"
+        return 0
+    fi
+
+    echo ""
+    if ! confirm "Install web configuration UI (accessible on port 8080)?"; then
+        print_info "Skipping web UI installation"
+        return 0
+    fi
+
+    # Check Python 3
+    if ! command -v python3 &>/dev/null; then
+        print_error "Python 3 is required for the web UI"
+        print_info "Install with: sudo dnf install python3  (or sudo apt install python3)"
+        return 1
+    fi
+
+    print_info "Installing web UI..."
+
+    # Clean up old service name (pre-v2.1.0 used "diretta-webui.service")
+    if systemctl is-active --quiet diretta-webui.service 2>/dev/null; then
+        print_info "Stopping old diretta-webui.service..."
+        sudo systemctl stop diretta-webui.service
+    fi
+    if systemctl is-enabled --quiet diretta-webui.service 2>/dev/null; then
+        sudo systemctl disable diretta-webui.service
+    fi
+    if [ -f /etc/systemd/system/diretta-webui.service ]; then
+        sudo rm -f /etc/systemd/system/diretta-webui.service
+        print_info "Removed old diretta-webui.service (renamed to diretta-renderer-webui)"
+    fi
+
+    sudo mkdir -p "$WEBUI_DIR"
+    sudo cp -r "$WEBUI_SRC/diretta_webui.py" "$WEBUI_DIR/"
+    sudo cp -r "$WEBUI_SRC/config_parser.py" "$WEBUI_DIR/"
+    sudo cp -r "$WEBUI_SRC/profiles" "$WEBUI_DIR/"
+    sudo cp -r "$WEBUI_SRC/templates" "$WEBUI_DIR/"
+    sudo cp -r "$WEBUI_SRC/static" "$WEBUI_DIR/"
+    print_success "Web UI files copied to $WEBUI_DIR"
+
+    # Install systemd service
+    if [ -f "$WEBUI_SRC/diretta-renderer-webui.service" ]; then
+        sudo cp "$WEBUI_SRC/diretta-renderer-webui.service" "$WEBUI_SERVICE_FILE"
+    else
+        sudo tee "$WEBUI_SERVICE_FILE" > /dev/null <<'WEBUI_SERVICE_EOF'
+[Unit]
+Description=Diretta Web Configuration Interface
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/diretta-renderer-upnp/webui/diretta_webui.py \
+    --profile /opt/diretta-renderer-upnp/webui/profiles/diretta_renderer.json \
+    --port 8080
+Restart=on-failure
+RestartSec=5
+ProtectSystem=strict
+ReadWritePaths=/etc/default
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+WEBUI_SERVICE_EOF
+    fi
+
+    sudo systemctl daemon-reload
+    sudo systemctl enable diretta-renderer-webui.service
+    sudo systemctl restart diretta-renderer-webui.service
+
+    # Get IP for display
+    local IP_ADDR=$(hostname -I 2>/dev/null | awk '{print $1}')
+    [ -z "$IP_ADDR" ] && IP_ADDR="<your-ip>"
+
+    echo ""
+    print_success "Web UI installed and running!"
+    echo ""
+    echo "  Access the configuration interface at:"
+    echo "    http://${IP_ADDR}:8080"
+    echo ""
+    echo "  Manage the web UI service:"
+    echo "    sudo systemctl status diretta-renderer-webui"
+    echo "    sudo systemctl stop diretta-renderer-webui"
     echo ""
 }
 
@@ -1528,8 +1681,11 @@ show_main_menu() {
     echo "  5) Configure network only"
     echo "     - Network interface and firewall setup"
     echo ""
+    echo "  6) Install web configuration UI only"
+    echo "     - Browser-based settings interface (port 8080)"
+    echo ""
     if [ "$OS" = "fedora" ]; then
-    echo "  6) Aggressive Fedora optimization"
+    echo "  7) Aggressive Fedora optimization"
     echo "     - For dedicated audio servers only"
     echo ""
     fi
@@ -1552,7 +1708,7 @@ run_full_installation() {
     echo "Quick Start:"
     echo ""
     echo "  1. Edit configuration (optional):"
-    echo "     sudo nano /opt/diretta-renderer-upnp/diretta-renderer.conf"
+    echo "     sudo nano /etc/default/diretta-renderer"
     echo ""
     echo "  2. Start the service:"
     echo "     sudo systemctl start diretta-renderer"
@@ -1605,6 +1761,10 @@ main() {
             configure_firewall
             exit 0
             ;;
+        --webui|-w)
+            setup_webui
+            exit 0
+            ;;
         --optimize|-o)
             optimize_fedora_aggressive
             exit 0
@@ -1618,6 +1778,7 @@ main() {
             echo "  --build, -b      Build only"
             echo "  --service, -s    Install systemd service only"
             echo "  --network, -n    Configure network only"
+            echo "  --webui, -w      Install web configuration UI"
             echo "  --optimize, -o   Aggressive Fedora optimization"
             echo "  --help, -h       Show this help"
             echo ""
@@ -1630,8 +1791,8 @@ main() {
     while true; do
         show_main_menu
 
-        local max_option=5
-        [ "$OS" = "fedora" ] && max_option=6
+        local max_option=6
+        [ "$OS" = "fedora" ] && max_option=7
 
         read -p "Choose option [1-$max_option/q]: " choice
 
@@ -1658,6 +1819,9 @@ main() {
                 print_success "Network configuration complete"
                 ;;
             6)
+                setup_webui
+                ;;
+            7)
                 if [ "$OS" = "fedora" ]; then
                     optimize_fedora_aggressive
                 else

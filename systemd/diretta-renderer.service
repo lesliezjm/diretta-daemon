@@ -8,7 +8,7 @@ Wants=network-online.target
 Type=simple
 User=root
 WorkingDirectory=/opt/diretta-renderer-upnp
-EnvironmentFile=-/opt/diretta-renderer-upnp/diretta-renderer.conf
+EnvironmentFile=-/etc/default/diretta-renderer
 ExecStart=/opt/diretta-renderer-upnp/start-renderer.sh
 
 # Restart policy
@@ -56,9 +56,8 @@ SystemCallArchitectures=native
 SystemCallFilter=~@mount @keyring @debug @module @swap @reboot @obsolete
 
 # --- Performance ---
-Nice=-10
-IOSchedulingClass=realtime
-IOSchedulingPriority=0
+# Nice and IOScheduling are now configurable via /etc/default/diretta-renderer
+# (NICE_LEVEL, IO_SCHED_CLASS, IO_SCHED_PRIORITY) and applied by start-renderer.sh
 
 [Install]
 WantedBy=multi-user.target

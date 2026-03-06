@@ -684,10 +684,24 @@ int UPnPDevice::actionGetTransportInfo(UpnpActionRequest* request) {
 int UPnPDevice::actionGetPositionInfo(UpnpActionRequest* request) {
     std::lock_guard<std::mutex> lock(m_stateMutex);
 
+    // Get real-time position when playing (bypasses 1s position thread cache)
+    // This ensures control points like UAPP get a non-zero position on first poll
+    double position = static_cast<double>(m_currentPosition);
+    if (m_transportState == "PLAYING" && m_positionCallback) {
+        position = m_positionCallback();
+        // Cap to duration (same logic as position thread)
+        if (m_trackDuration > 0 && position >= m_trackDuration) {
+            position = m_trackDuration - 1;
+        }
+        if (position < 0) position = 0;
+    }
+
+    std::string posStr = formatTimePrecise(position);
+
     // Log position info for debugging track transitions
     std::string shortURI = m_currentTrackURI;
     if (shortURI.size() > 50) shortURI = "..." + shortURI.substr(shortURI.size() - 50);
-    DEBUG_LOG("[UPnPDevice] GetPositionInfo: pos=" << formatTime(m_currentPosition)
+    DEBUG_LOG("[UPnPDevice] GetPositionInfo: pos=" << posStr
               << " dur=" << formatTime(m_trackDuration) << " URI=" << shortURI);
 
     IXML_Document* response = createActionResponse("GetPositionInfo");
@@ -695,8 +709,8 @@ int UPnPDevice::actionGetPositionInfo(UpnpActionRequest* request) {
     addResponseArg(response, "TrackDuration", formatTime(m_trackDuration));
     addResponseArg(response, "TrackMetaData", m_currentTrackMetadata);
     addResponseArg(response, "TrackURI", m_currentTrackURI);
-    addResponseArg(response, "RelTime", formatTime(m_currentPosition));
-    addResponseArg(response, "AbsTime", formatTime(m_currentPosition));
+    addResponseArg(response, "RelTime", posStr);
+    addResponseArg(response, "AbsTime", posStr);
     addResponseArg(response, "RelCount", "2147483647");
     addResponseArg(response, "AbsCount", "2147483647");
 
@@ -902,12 +916,31 @@ std::string UPnPDevice::formatTime(int seconds) const {
     int h = seconds / 3600;
     int m = (seconds % 3600) / 60;
     int s = seconds % 60;
-    
+
     std::stringstream ss;
-    ss << std::setfill('0') 
+    ss << std::setfill('0')
        << std::setw(2) << h << ":"
        << std::setw(2) << m << ":"
        << std::setw(2) << s;
+    return ss.str();
+}
+
+// Format with sub-second precision: "HH:MM:SS.FFF"
+// Used by GetPositionInfo for accurate real-time position reporting
+std::string UPnPDevice::formatTimePrecise(double seconds) const {
+    if (seconds < 0) seconds = 0;
+    int totalSeconds = static_cast<int>(seconds);
+    int millis = static_cast<int>((seconds - totalSeconds) * 1000);
+    int h = totalSeconds / 3600;
+    int m = (totalSeconds % 3600) / 60;
+    int s = totalSeconds % 60;
+
+    std::stringstream ss;
+    ss << std::setfill('0')
+       << std::setw(2) << h << ":"
+       << std::setw(2) << m << ":"
+       << std::setw(2) << s << "."
+       << std::setw(3) << millis;
     return ss.str();
 }
 
@@ -1890,6 +1923,10 @@ std::string UPnPDevice::getDeviceURL() const {
     std::stringstream ss;
     ss << "http://" << ipAddr << ":" << port;
     return ss.str();
+}
+
+void UPnPDevice::setPositionCallback(PositionCallback cb) {
+    m_positionCallback = std::move(cb);
 }
 
 // Set current position (called regularly during playback)
