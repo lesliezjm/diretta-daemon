@@ -953,7 +953,7 @@ IXML_Document* UPnPDevice::createActionResponse(const std::string& actionName,
                                                   const std::string& serviceType) {
     IXML_Document* response = ixmlDocument_createDocument();
     IXML_Element* actionResponse = ixmlDocument_createElement(response,
-        (actionName + "Response").c_str());
+        ("u:" + actionName + "Response").c_str());
     ixmlElement_setAttribute(actionResponse, "xmlns:u", serviceType.c_str());
     ixmlNode_appendChild(&response->n, &actionResponse->n);
     return response;
