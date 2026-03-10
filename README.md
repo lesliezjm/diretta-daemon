@@ -1,4 +1,4 @@
-# Diretta UPnP Renderer v2.1.0
+# Diretta UPnP Renderer v2.1.1
 
 **The world's first native UPnP/DLNA renderer with Diretta protocol support - Low-Latency Edition**
 
@@ -8,23 +8,21 @@
 
 ---
 
-![Version](https://img.shields.io/badge/version-2.1.0-blue.svg)
+![Version](https://img.shields.io/badge/version-2.1.1-blue.svg)
 ![Low Latency](https://img.shields.io/badge/Latency-Low-green.svg)
 ![SDK](https://img.shields.io/badge/SDK-DIRETTA::Sync-orange.svg)
 ![Audirvana](https://img.shields.io/badge/Audirvana-Compatible-green.svg)
 
 ---
 
-## What's New in v2.1.0
+## What's New in v2.1.1
 
-**Web Configuration UI, Advanced SDK settings, stability & compatibility fixes.**
+**UAPP compatibility, format transition stability, high sample rate support.**
 
-- **Web Configuration UI** — Configure the renderer from your browser at `http://<ip>:8080` — no SSH needed. Edit target, port, network interface, gapless mode, and all advanced Diretta SDK settings. Save & Restart in one click. Install via `./install.sh --webui` or menu option 6.
-- **Advanced Diretta SDK settings** — All tuning options from v1.3.3 are back: `--thread-mode`, `--cycle-time`, `--info-cycle`, `--transfer-mode`, `--target-profile-limit`, `--mtu` (see [Command Line Options](#advanced-diretta-sdk-settings) and [docs/CONFIGURATION.md](docs/CONFIGURATION.md))
-- **Automatic config migration** — Upgrading from a previous version? `install.sh` now automatically migrates your settings to the new config file (backup saved as `.bak`)
-- **Stop action fix** (by herisson-88) — uses `stopPlayback()` instead of `close()` on UPnP Stop, keeping the SDK connection open for faster resume and preventing white noise on hi-res transitions (Holo Red and similar targets)
-- **libupnp auto-detection** — Makefile uses `pkg-config` to detect libupnp include paths, fixing compilation on GentooPlayer and other non-standard distributions
-- **Privilege drop removed** — The `--user`/`DROP_USER` feature has been removed (caused SCHED_FIFO loss on worker threads)
+- **UAPP (USB Audio Player Pro) compatibility** — Fixed SOAP response namespace (`u:` prefix) for strict XML parsers like Cling (Android). Position tracking and track advancement now work correctly with UAPP.
+- **Format transition stability** — Fixed race condition during rapid PCM format changes (rate/bitdepth) that could cause crashes with Audirvana Studio and other control points. Lifecycle mutex prevents concurrent open/stop/close operations.
+- **High sample rate buffers** — Adaptive buffer sizing for rates >192kHz (352.8kHz, 384kHz, 768kHz, 1536kHz). Ring buffer 2.0s, prefill 1000ms, max 32MB.
+- **Build capabilities logging** — Startup displays architecture (x86_64/aarch64/arm) and SIMD support (AVX2/NEON/scalar)
 
 See [CHANGELOG.md](CHANGELOG.md) for details.
 
@@ -32,6 +30,7 @@ See [CHANGELOG.md](CHANGELOG.md) for details.
 
 | Version | Highlights |
 |---------|-----------|
+| **v2.1.0** | Web Configuration UI, Advanced SDK settings, stop fix (herisson-88), libupnp auto-detect |
 | **v2.0.6** | Advanced SDK settings, config migration, stop fix (herisson-88), libupnp auto-detect |
 | **v2.0.5** | Stop fix for Holo Red (herisson-88), libupnp auto-detection, privilege drop removed |
 | **v2.0.4** | Centralized logging, rebuffering on underrun, ARM NEON SIMD, systemd hardening, unit tests |
@@ -791,4 +790,4 @@ This software is provided "as is" without warranty. While designed for high-qual
 
 **Enjoy bit-perfect, low-latency audio streaming!**
 
-*Last updated: 2026-03-06 (v2.1.0)*
+*Last updated: 2026-03-10 (v2.1.1)*
