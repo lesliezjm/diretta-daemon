@@ -19,6 +19,7 @@
 #define RENDERER_BUILD_TIME __TIME__
 
 std::unique_ptr<DirettaRenderer> g_renderer;
+std::atomic<bool> g_running{true};
 
 // Async logging infrastructure (A3 optimization)
 // Declared here (before shutdownAsyncLogging) to avoid forward reference
@@ -40,6 +41,7 @@ void shutdownAsyncLogging() {
 
 void signalHandler(int signal) {
     std::cout << "\nSignal " << signal << " received, shutting down..." << std::endl;
+    g_running.store(false, std::memory_order_release);
     if (g_renderer) {
         g_renderer->stop();
     }
@@ -288,7 +290,12 @@ int main(int argc, char* argv[]) {
 
         std::cout << "Starting renderer..." << std::endl;
 
-        if (!g_renderer->start()) {
+        if (!g_renderer->start(&g_running)) {
+            if (!g_running.load(std::memory_order_acquire)) {
+                // Cancelled by signal — clean exit
+                shutdownAsyncLogging();
+                return 0;
+            }
             std::cerr << "Failed to start renderer" << std::endl;
             shutdownAsyncLogging();
             return 1;

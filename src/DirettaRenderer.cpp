@@ -117,7 +117,7 @@ void DirettaRenderer::waitForCallbackComplete() {
 // Start
 //=============================================================================
 
-bool DirettaRenderer::start() {
+bool DirettaRenderer::start(std::atomic<bool>* stopSignal) {
     if (m_running) {
         std::cerr << "[DirettaRenderer] Already running" << std::endl;
         return false;
@@ -185,7 +185,7 @@ bool DirettaRenderer::start() {
             std::cout << "[DirettaRenderer] Target profile limit: " << syncConfig.targetProfileLimitTime
                       << " us (" << (syncConfig.targetProfileLimitTime > 0 ? "TargetProfile" : "SelfProfile") << ")" << std::endl;
 
-        if (!m_direttaSync->enable(syncConfig)) {
+        if (!m_direttaSync->enable(syncConfig, stopSignal)) {
             std::cerr << "[DirettaRenderer] Failed to enable DirettaSync" << std::endl;
             return false;
         }

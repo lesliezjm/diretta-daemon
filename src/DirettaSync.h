@@ -182,6 +182,10 @@ namespace DirettaRetry {
     // Format change reopen
     constexpr int REOPEN_SINK_RETRIES = 10;
     constexpr int REOPEN_SINK_DELAY_MS = 500;
+
+    // Target discovery retry (indefinite until found or cancelled)
+    constexpr int DISCOVER_RETRY_MS = 2000;       // Retry every 2 seconds
+    constexpr int DISCOVER_LOG_INTERVAL_MS = 5000; // Log status every 5 seconds
 }
 
 //=============================================================================
@@ -344,7 +348,8 @@ public:
     /**
      * @brief Initialize and discover Diretta target (like MPD's Enable())
      */
-    bool enable(const DirettaConfig& config = DirettaConfig());
+    bool enable(const DirettaConfig& config = DirettaConfig(),
+                std::atomic<bool>* stopSignal = nullptr);
 
     /**
      * @brief Shutdown (like MPD's Disable())
@@ -490,7 +495,7 @@ private:
     // Internal Methods
     //=========================================================================
 
-    bool discoverTarget();
+    bool discoverTarget(std::atomic<bool>* stopSignal = nullptr);
     bool measureMTU();
     bool openSyncConnection();
     bool openSDK();  // Helper: calls DIRETTA::Sync::open() with config params
