@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.1.2] - 2026-03-15
+
+### Added
+
+- **Resilient target discovery**: When the Diretta target is not available at startup, the renderer now retries every 2 seconds (with status logged every 5 seconds) instead of exiting immediately. This is especially important on systems without systemd auto-restart (e.g., GentooPlayer with OpenRC). (Suggested by Filippo/GentooPlayer)
+
+---
+
 ## [2.1.1] - 2026-03-10
 
 ### Fixed
