@@ -191,6 +191,10 @@ Version 2.x uses a simplified, performance-focused architecture:
 - **Jumbo frame support**: Up to 16KB MTU for maximum performance
 - **Automatic MTU detection**: Configures optimal packet size
 
+### Robustness
+- **Resilient startup**: Retries target discovery indefinitely if target is not yet available, with periodic status logging
+- **Auto-release**: Diretta target released after idle timeout for coexistence with other Diretta hosts
+
 ---
 
 ## Requirements
