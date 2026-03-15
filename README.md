@@ -1,4 +1,4 @@
-# Diretta UPnP Renderer v2.1.1
+# Diretta UPnP Renderer v2.1.2
 
 **The world's first native UPnP/DLNA renderer with Diretta protocol support - Low-Latency Edition**
 
@@ -8,21 +8,18 @@
 
 ---
 
-![Version](https://img.shields.io/badge/version-2.1.1-blue.svg)
+![Version](https://img.shields.io/badge/version-2.1.2-blue.svg)
 ![Low Latency](https://img.shields.io/badge/Latency-Low-green.svg)
 ![SDK](https://img.shields.io/badge/SDK-DIRETTA::Sync-orange.svg)
 ![Audirvana](https://img.shields.io/badge/Audirvana-Compatible-green.svg)
 
 ---
 
-## What's New in v2.1.1
+## What's New in v2.1.2
 
-**UAPP compatibility, format transition stability, high sample rate support.**
+**Resilient target discovery for systems without auto-restart.**
 
-- **UAPP (USB Audio Player Pro) compatibility** — Fixed SOAP response namespace (`u:` prefix) for strict XML parsers like Cling (Android). Position tracking and track advancement now work correctly with UAPP.
-- **Format transition stability** — Fixed race condition during rapid PCM format changes (rate/bitdepth) that could cause crashes with Audirvana Studio and other control points. Lifecycle mutex prevents concurrent open/stop/close operations.
-- **High sample rate buffers** — Adaptive buffer sizing for rates >192kHz (352.8kHz, 384kHz, 768kHz, 1536kHz). Ring buffer 2.0s, prefill 1000ms, max 32MB.
-- **Build capabilities logging** — Startup displays architecture (x86_64/aarch64/arm) and SIMD support (AVX2/NEON/scalar)
+- **Resilient target discovery** — When the Diretta target is not available at startup, the renderer now retries every 2 seconds instead of exiting immediately. Especially important on systems without systemd auto-restart (e.g., GentooPlayer with OpenRC). Suggested by Filippo/GentooPlayer.
 
 See [CHANGELOG.md](CHANGELOG.md) for details.
 
@@ -30,6 +27,7 @@ See [CHANGELOG.md](CHANGELOG.md) for details.
 
 | Version | Highlights |
 |---------|-----------|
+| **v2.1.1** | UAPP compatibility, format transition stability, high sample rate buffers, build capabilities logging |
 | **v2.1.0** | Web Configuration UI, Advanced SDK settings, stop fix (herisson-88), libupnp auto-detect |
 | **v2.0.6** | Advanced SDK settings, config migration, stop fix (herisson-88), libupnp auto-detect |
 | **v2.0.5** | Stop fix for Holo Red (herisson-88), libupnp auto-detection, privilege drop removed |
@@ -794,4 +792,4 @@ This software is provided "as is" without warranty. While designed for high-qual
 
 **Enjoy bit-perfect, low-latency audio streaming!**
 
-*Last updated: 2026-03-10 (v2.1.1)*
+*Last updated: 2026-03-15 (v2.1.2)*
