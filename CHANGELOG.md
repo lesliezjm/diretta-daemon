@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.1.5] - 2026-03-20
+
+### Fixed
+
+- **Silence on 16-bit and 24-bit content with some DACs**: `configureSinkPCM()` always tried 32-bit negotiation first, regardless of the source bit depth. DACs that report 32-bit support but are physically limited to 24-bit would produce silence or noise for 16-bit and 24-bit content. Now only offers 32-bit when the source is actually 32-bit. (Reported by PatrickW, matching fix from slim2diretta v1.2.2)
+
+- **Extended stabilization on first Diretta target connect**: Added longer stabilization delay on initial SDK connection to prevent audio glitches at startup.
+
+---
+
 ## [2.1.4] - 2026-03-16
 
 ### Fixed
