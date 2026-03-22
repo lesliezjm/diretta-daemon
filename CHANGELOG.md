@@ -1,10 +1,12 @@
 # Changelog
 
-## [2.1.5] - 2026-03-20
+## [2.1.5] - 2026-03-22
 
 ### Fixed
 
 - **Silence on 16-bit and 24-bit content with some DACs**: `configureSinkPCM()` always tried 32-bit negotiation first, regardless of the source bit depth. DACs that report 32-bit support but are physically limited to 24-bit would produce silence or noise for 16-bit and 24-bit content. Now only offers 32-bit when the source is actually 32-bit. (Reported by PatrickW, matching fix from slim2diretta v1.2.2)
+
+- **Worker thread join timeout in startSyncWorker**: Last remaining bare `m_workerThread.join()` in `startSyncWorker()` could block indefinitely if the SDK worker was unresponsive during format transitions. Now uses `joinWorkerWithTimeout(1000ms)` matching all other join sites. (Matching fix from slim2diretta v1.2.4, reported by Jeep972)
 
 - **Extended stabilization on first Diretta target connect**: Added longer stabilization delay on initial SDK connection to prevent audio glitches at startup.
 
