@@ -1734,7 +1734,7 @@ bool DirettaSync::startSyncWorker() {
     }
 
     if (m_workerThread.joinable()) {
-        m_workerThread.join();
+        joinWorkerWithTimeout(1000);
     }
 
     m_running = true;
