@@ -1,6 +1,6 @@
 # Changelog
 
-## [2.1.5] - 2026-03-22
+## [2.1.5] - 2026-03-25
 
 ### Fixed
 
@@ -9,6 +9,8 @@
 - **Worker thread join timeout in startSyncWorker**: Last remaining bare `m_workerThread.join()` in `startSyncWorker()` could block indefinitely if the SDK worker was unresponsive during format transitions. Now uses `joinWorkerWithTimeout(1000ms)` matching all other join sites. (Matching fix from slim2diretta v1.2.4, reported by Jeep972)
 
 - **Extended stabilization on first Diretta target connect**: Added longer stabilization delay on initial SDK connection to prevent audio glitches at startup.
+
+- **First-play glitch (~5s silence)**: Pre-connect Diretta pipeline at startup with default format (44100/24/2 PCM). The first real play now uses quick resume instead of cold connect, eliminating the silence gap reported with LMS (via slim2UPnP) and Roon.
 
 ---
 
