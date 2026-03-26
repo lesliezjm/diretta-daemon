@@ -14,6 +14,8 @@
 
 - **White noise after track change with Audirvana** (by herisson-88): Anticipated preload opened a second AudioDecoder in parallel, causing FFmpeg to read up to 5MB (`probesize` default) from Audirvana's HTTP server concurrently with the active stream. Audirvana's embedded server doesn't handle concurrent reads well, corrupting the active stream data → permanent white noise ~4 seconds after track change. Fix: limit `probesize` to 32KB and `max_analyze_duration` to 0 for local servers. (PR #61)
 
+- **UAPP position tracking still broken after v2.1.1 namespace fix**: The `u:` namespace prefix fix allowed UAPP's strict Cling parser to read the SOAP response envelope, but it then crashed parsing the time values. `RelTime`/`AbsTime` contained milliseconds (`00:00:01.407`) which strict parsers don't support. Now uses `HH:MM:SS` format without fractional seconds.
+
 ---
 
 ## [2.1.4] - 2026-03-16
