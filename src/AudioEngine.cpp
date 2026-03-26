@@ -188,6 +188,14 @@ bool AudioDecoder::open(const std::string& url) {
     // Free unused options
     av_dict_free(&options);
 
+    // Limit probe for local servers: WAV headers are ~44 bytes, no need to
+    // read megabytes. Default probesize (5MB) causes massive concurrent reads
+    // during anticipated preload, saturating Audirvana's HTTP server.
+    if (isLocalServer) {
+        m_formatContext->probesize = 32768;       // 32KB — enough for any WAV/FLAC/DSF header
+        m_formatContext->max_analyze_duration = 0; // Don't analyze beyond header
+    }
+
     // Retrieve stream information
     if (avformat_find_stream_info(m_formatContext, nullptr) < 0) {
         std::cerr << "[AudioDecoder] Failed to find stream info" << std::endl;

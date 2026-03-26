@@ -1,4 +1,4 @@
-# Diretta UPnP Renderer v2.1.4
+# Diretta UPnP Renderer v2.1.5
 
 **The world's first native UPnP/DLNA renderer with Diretta protocol support - Low-Latency Edition**
 
@@ -8,7 +8,7 @@
 
 ---
 
-![Version](https://img.shields.io/badge/version-2.1.4-blue.svg)
+![Version](https://img.shields.io/badge/version-2.1.5-blue.svg)
 ![Low Latency](https://img.shields.io/badge/Latency-Low-green.svg)
 ![SDK](https://img.shields.io/badge/SDK-DIRETTA::Sync-orange.svg)
 ![Audirvana](https://img.shields.io/badge/Audirvana-Compatible-green.svg)
@@ -795,4 +795,4 @@ This software is provided "as is" without warranty. While designed for high-qual
 
 **Enjoy bit-perfect, low-latency audio streaming!**
 
-*Last updated: 2026-03-16 (v2.1.4)*
+*Last updated: 2026-03-22 (v2.1.5)*

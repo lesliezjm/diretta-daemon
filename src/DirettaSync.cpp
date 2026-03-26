@@ -968,19 +968,23 @@ void DirettaSync::fullReset() {
 //=============================================================================
 
 void DirettaSync::configureSinkPCM(int rate, int channels, int inputBits, int& acceptedBits) {
-    (void)inputBits;
     std::lock_guard<std::mutex> lock(m_configMutex);
 
     DIRETTA::FormatConfigure fmt;
     fmt.setSpeed(rate);
     fmt.setChannel(channels);
 
-    fmt.setFormat(DIRETTA::FormatID::FMT_PCM_SIGNED_32);
-    if (checkSinkSupport(fmt)) {
-        setSinkConfigure(fmt);
-        acceptedBits = 32;
-        DIRETTA_LOG("Sink PCM: " << rate << "Hz " << channels << "ch 32-bit");
-        return;
+    // Only try 32-bit if source is actually 32-bit.
+    // Prevents silence/noise on DACs that report 32-bit support
+    // but are physically limited to 24-bit.
+    if (inputBits >= 32) {
+        fmt.setFormat(DIRETTA::FormatID::FMT_PCM_SIGNED_32);
+        if (checkSinkSupport(fmt)) {
+            setSinkConfigure(fmt);
+            acceptedBits = 32;
+            DIRETTA_LOG("Sink PCM: " << rate << "Hz " << channels << "ch 32-bit");
+            return;
+        }
     }
 
     fmt.setFormat(DIRETTA::FormatID::FMT_PCM_SIGNED_24);
@@ -1612,35 +1616,52 @@ bool DirettaSync::getNewStream(diretta_stream& baseStream) {
     if (!m_postOnlineDelayDone.load(std::memory_order_acquire)) {
         int stabilizationTarget = static_cast<int>(DirettaBuffer::POST_ONLINE_SILENCE_BUFFERS);
 
+        // Calculate cycle time based on MTU and data rate for time-based scaling
+        int efficientMTU = static_cast<int>(m_effectiveMTU) - 3;
+        int currentSampleRate = m_cachedConsumerSampleRate;
+
         if (currentIsDsd) {
             // Target warmup time scales with DSD rate:
             // DSD64: 50ms, DSD128: 100ms, DSD256: 200ms, DSD512: 400ms
-            // C1: Use cached sample rate from generation counter
-            int currentSampleRate = m_cachedConsumerSampleRate;
             int dsdMultiplier = currentSampleRate / 2822400;  // DSD64 = 1
             int targetWarmupMs = 50 * std::max(1, dsdMultiplier);  // 50ms baseline
 
-            // Calculate cycle time based on MTU and data rate
-            // cycleTime = (efficientMTU / bytesPerSecond) in microseconds
-            // SDK's m_effectiveMTU already accounts for IP/UDP, only Diretta overhead (~3 bytes)
-            int efficientMTU = static_cast<int>(m_effectiveMTU) - 3;
             double bytesPerSecond = static_cast<double>(currentSampleRate) * 2 / 8.0;  // 2ch, 1bit
             double cycleTimeUs = (static_cast<double>(efficientMTU) / bytesPerSecond) * 1000000.0;
 
-            // Calculate buffers needed for target warmup time
-            // targetWarmupMs * 1000 = warmup in microseconds
             double buffersNeeded = (targetWarmupMs * 1000.0) / cycleTimeUs;
             stabilizationTarget = static_cast<int>(std::ceil(buffersNeeded));
-
-            // Clamp to reasonable range
             stabilizationTarget = std::max(50, std::min(stabilizationTarget, 3000));
+        } else {
+            // PCM: Scale stabilization with MTU like DSD
+            // First connect needs extra time for target clock sync
+            int targetWarmupMs = m_isFirstConnect
+                ? static_cast<int>(DirettaBuffer::FIRST_CONNECT_STABILIZATION_MS)
+                : static_cast<int>(DirettaBuffer::DAC_STABILIZATION_MS);
+
+            int channels = m_channels.load(std::memory_order_acquire);
+            int bps = m_bytesPerSample.load(std::memory_order_acquire);
+            if (channels <= 0) channels = 2;
+            if (bps <= 0) bps = 4;
+            double bytesPerSecond = static_cast<double>(currentSampleRate) * channels * bps;
+            double cycleTimeUs = (static_cast<double>(efficientMTU) / bytesPerSecond) * 1000000.0;
+
+            double buffersNeeded = (targetWarmupMs * 1000.0) / cycleTimeUs;
+            stabilizationTarget = static_cast<int>(std::ceil(buffersNeeded));
+            stabilizationTarget = std::max(static_cast<int>(DirettaBuffer::POST_ONLINE_SILENCE_BUFFERS),
+                                           std::min(stabilizationTarget, 3000));
         }
 
         int count = m_stabilizationCount.fetch_add(1, std::memory_order_relaxed) + 1;
         if (count >= stabilizationTarget) {
             m_postOnlineDelayDone = true;
             m_stabilizationCount.store(0, std::memory_order_relaxed);
-            DIRETTA_LOG("Post-online stabilization complete (" << count << " buffers)");
+            if (m_isFirstConnect) {
+                m_isFirstConnect = false;
+                DIRETTA_LOG("First connect stabilization complete (" << count << " buffers)");
+            } else {
+                DIRETTA_LOG("Post-online stabilization complete (" << count << " buffers)");
+            }
         }
         std::memset(dest, currentSilenceByte, currentBytesPerBuffer);
         m_workerActive = false;
@@ -1713,7 +1734,7 @@ bool DirettaSync::startSyncWorker() {
     }
 
     if (m_workerThread.joinable()) {
-        m_workerThread.join();
+        joinWorkerWithTimeout(1000);
     }
 
     m_running = true;

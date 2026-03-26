@@ -129,6 +129,14 @@ RAT_MP4 = 0x2000_00000000    // 4x (176.4/192k)
 // ... up to RAT_MP4096 for DSD1024
 ```
 
+## Bit Depth Handling
+
+`configureSinkPCM()` negotiates the PCM format with the Diretta sink based on the source bit depth (`inputBits`):
+- **16-bit and 24-bit sources**: Only negotiate up to 24-bit. Prevents silence/noise on DACs that report 32-bit support at the Diretta target level but are physically limited to 24-bit.
+- **32-bit sources**: Try 32-bit first, fall back to 24-bit if the sink doesn't support it.
+
+`AudioEngine.cpp` detects the real bit depth via FFmpeg's `bits_per_raw_sample` (authoritative when set) or the `sample_fmt` fallback. The detected `bitDepth` is passed through `TrackInfo` → `AudioFormat` → `configureSinkPCM()`.
+
 ## Audio Hot Path
 
 The following functions are in the critical audio path:

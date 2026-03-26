@@ -688,7 +688,9 @@ int UPnPDevice::actionGetPositionInfo(UpnpActionRequest* request) {
         if (position < 0) position = 0;
     }
 
-    std::string posStr = formatTimePrecise(position);
+    // Use HH:MM:SS without milliseconds for maximum compatibility
+    // Strict UPnP parsers (Cling/UAPP) may crash on fractional seconds
+    std::string posStr = formatTime(static_cast<int>(position));
 
     // Log position info for debugging track transitions
     std::string shortURI = m_currentTrackURI;

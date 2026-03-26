@@ -1,5 +1,23 @@
 # Changelog
 
+## [2.1.5] - 2026-03-25
+
+### Fixed
+
+- **Silence on 16-bit and 24-bit content with some DACs**: `configureSinkPCM()` always tried 32-bit negotiation first, regardless of the source bit depth. DACs that report 32-bit support but are physically limited to 24-bit would produce silence or noise for 16-bit and 24-bit content. Now only offers 32-bit when the source is actually 32-bit. (Reported by PatrickW, matching fix from slim2diretta v1.2.2)
+
+- **Worker thread join timeout in startSyncWorker**: Last remaining bare `m_workerThread.join()` in `startSyncWorker()` could block indefinitely if the SDK worker was unresponsive during format transitions. Now uses `joinWorkerWithTimeout(1000ms)` matching all other join sites. (Matching fix from slim2diretta v1.2.4, reported by Jeep972)
+
+- **Extended stabilization on first Diretta target connect**: Added longer stabilization delay on initial SDK connection to prevent audio glitches at startup.
+
+- **First-play glitch (~5s silence)**: Pre-connect Diretta pipeline at startup with default format (44100/24/2 PCM). The first real play now uses quick resume instead of cold connect, eliminating the silence gap reported with LMS (via slim2UPnP) and Roon.
+
+- **White noise after track change with Audirvana** (by herisson-88): Anticipated preload opened a second AudioDecoder in parallel, causing FFmpeg to read up to 5MB (`probesize` default) from Audirvana's HTTP server concurrently with the active stream. Audirvana's embedded server doesn't handle concurrent reads well, corrupting the active stream data → permanent white noise ~4 seconds after track change. Fix: limit `probesize` to 32KB and `max_analyze_duration` to 0 for local servers. (PR #61)
+
+- **UAPP position tracking still broken after v2.1.1 namespace fix**: The `u:` namespace prefix fix allowed UAPP's strict Cling parser to read the SOAP response envelope, but it then crashed parsing the time values. `RelTime`/`AbsTime` contained milliseconds (`00:00:01.407`) which strict parsers don't support. Now uses `HH:MM:SS` format without fractional seconds.
+
+---
+
 ## [2.1.4] - 2026-03-16
 
 ### Fixed
