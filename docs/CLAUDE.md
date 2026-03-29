@@ -426,6 +426,7 @@ sudo apt install build-essential libavformat-dev libavcodec-dev libavutil-dev li
 - [x] Audirvana preload probe fix — limit `probesize` to 32KB for local servers (herisson-88, PR #61)
 - [x] First-play pre-connect — eliminates cold connect silence on first track
 - [x] UAPP milliseconds fix — `HH:MM:SS` without fractional seconds in GetPositionInfo
+- [x] UAPP async Play — `onPlay` callback launched asynchronously for fast HTTP 200 response
 
 ### Potential Future Work
 - [ ] AVX-512 format conversions (currently only memcpy uses AVX-512)
