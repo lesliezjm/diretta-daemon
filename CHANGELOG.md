@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.7] - 2026-03-29
+
+### Fixed
+- **UAPP GetPositionInfo response rejected by Cling parser**: The AVTransport SCPD declared only 5 output arguments for `GetPositionInfo` (Track, TrackDuration, TrackMetaData, TrackURI, RelTime) but the SOAP response returned 8 (including AbsTime, RelCount, AbsCount). Cling validates SOAP responses against the SCPD and silently rejects responses with undeclared arguments — causing UAPP to ignore position data entirely. Added the 3 missing arguments and their corresponding state variables (AbsoluteTimePosition, RelativeCounterPosition, AbsoluteCounterPosition) to the AVTransport SCPD.
+
+---
+
 ## [2.1.6] - 2026-03-29
 
 ### Fixed

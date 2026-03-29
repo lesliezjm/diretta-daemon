@@ -1,4 +1,4 @@
-# Diretta UPnP Renderer v2.1.6
+# Diretta UPnP Renderer v2.1.7
 
 **The world's first native UPnP/DLNA renderer with Diretta protocol support - Low-Latency Edition**
 
@@ -8,19 +8,18 @@
 
 ---
 
-![Version](https://img.shields.io/badge/version-2.1.6-blue.svg)
+![Version](https://img.shields.io/badge/version-2.1.7-blue.svg)
 ![Low Latency](https://img.shields.io/badge/Latency-Low-green.svg)
 ![SDK](https://img.shields.io/badge/SDK-DIRETTA::Sync-orange.svg)
 ![Audirvana](https://img.shields.io/badge/Audirvana-Compatible-green.svg)
 
 ---
 
-## What's New in v2.1.6
+## What's New in v2.1.7
 
-**UAPP progress bar fix, service startup fix.**
+**UAPP full compatibility fix.**
 
-- **UAPP progress bar fix** — The Play SOAP response was delayed ~320ms (track opening was synchronous). UAPP has a short timeout and wouldn't start its progress timer. The onPlay callback is now asynchronous so the HTTP 200 response is sent immediately.
-- **Service startup fix** — Fixed `--bind-ip` vs `--interface` mismatch in wrapper script when using IP addresses (reported by Pascal)
+- **UAPP GetPositionInfo fix** — Cling (UAPP's UPnP parser) validates SOAP responses against the SCPD. Three output arguments (AbsTime, RelCount, AbsCount) were returned in GetPositionInfo responses but not declared in the AVTransport SCPD, causing Cling to silently reject the position data. Now fully spec-compliant.
 
 See [CHANGELOG.md](CHANGELOG.md) for details.
 
@@ -28,6 +27,7 @@ See [CHANGELOG.md](CHANGELOG.md) for details.
 
 | Version | Highlights |
 |---------|-----------|
+| **v2.1.6** | UAPP async Play response, service startup fix (Pascal) |
 | **v2.1.5** | DAC bit depth negotiation, Audirvana white noise fix (herisson-88), first-play glitch, UAPP milliseconds |
 | **v2.1.4** | Audirvana link-local detection, resilient UPnP startup |
 | **v2.1.3** | Fix target retry pre-check bypass |
@@ -797,4 +797,4 @@ This software is provided "as is" without warranty. While designed for high-qual
 
 **Enjoy bit-perfect, low-latency audio streaming!**
 
-*Last updated: 2026-03-29 (v2.1.6)*
+*Last updated: 2026-03-29 (v2.1.7)*

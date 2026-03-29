@@ -1317,6 +1317,21 @@ std::string UPnPDevice::generateAVTransportSCPD() {
           <direction>out</direction>
           <relatedStateVariable>RelativeTimePosition</relatedStateVariable>
         </argument>
+        <argument>
+          <name>AbsTime</name>
+          <direction>out</direction>
+          <relatedStateVariable>AbsoluteTimePosition</relatedStateVariable>
+        </argument>
+        <argument>
+          <name>RelCount</name>
+          <direction>out</direction>
+          <relatedStateVariable>RelativeCounterPosition</relatedStateVariable>
+        </argument>
+        <argument>
+          <name>AbsCount</name>
+          <direction>out</direction>
+          <relatedStateVariable>AbsoluteCounterPosition</relatedStateVariable>
+        </argument>
       </argumentList>
     </action>
     <action>
@@ -1531,6 +1546,18 @@ std::string UPnPDevice::generateAVTransportSCPD() {
     <stateVariable sendEvents="no">
       <name>RelativeTimePosition</name>
       <dataType>string</dataType>
+    </stateVariable>
+    <stateVariable sendEvents="no">
+      <name>AbsoluteTimePosition</name>
+      <dataType>string</dataType>
+    </stateVariable>
+    <stateVariable sendEvents="no">
+      <name>RelativeCounterPosition</name>
+      <dataType>i4</dataType>
+    </stateVariable>
+    <stateVariable sendEvents="no">
+      <name>AbsoluteCounterPosition</name>
+      <dataType>i4</dataType>
     </stateVariable>
     <stateVariable sendEvents="no">
       <name>PlaybackStorageMedium</name>
