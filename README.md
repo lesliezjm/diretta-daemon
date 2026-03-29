@@ -1,4 +1,4 @@
-# Diretta UPnP Renderer v2.1.5
+# Diretta UPnP Renderer v2.1.6
 
 **The world's first native UPnP/DLNA renderer with Diretta protocol support - Low-Latency Edition**
 

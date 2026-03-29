@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.1.6] - 2026-03-29
+
+### Fixed
+- **Service startup crash with IP-based NETWORK_INTERFACE**: `start-renderer.sh` passed `--bind-ip` when `NETWORK_INTERFACE` was an IP address (e.g., `192.168.1.32`), but the executable only accepts `--interface`. This caused `Unknown option: --bind-ip` and service failure on restart (reported by Pascal). `--interface` accepts both interface names and IP addresses via libupnp's `UpnpInit2`.
+
+### Changed
+- Version updated to 2.1.6
+
+---
+
 ## [2.1.5] - 2026-03-27
 
 ### Fixed
