@@ -61,6 +61,17 @@
                     "label": "Network Interface",
                     "description": "Interface name (eth0) or IP address. Empty = auto-detect.",
                     "default": ""
+                },
+                {
+                    "key": "MINIMAL_UPNP",
+                    "type": "select",
+                    "label": "Minimal UPnP Mode",
+                    "description": "Disables position polling and event notifications for reduced CPU overhead. Best with JPlay iOS.",
+                    "default": "",
+                    "options": [
+                        {"value": "", "label": "Standard (full UPnP)"},
+                        {"value": "1", "label": "Minimal (no position/events)"}
+                    ]
                 }
             ]
         },

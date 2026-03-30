@@ -10,6 +10,7 @@ PORT="${PORT:-4005}"
 RENDERER_NAME="${RENDERER_NAME:-}"
 GAPLESS="${GAPLESS:-}"
 VERBOSE="${VERBOSE:-}"
+MINIMAL_UPNP="${MINIMAL_UPNP:-}"
 NETWORK_INTERFACE="${NETWORK_INTERFACE:-}"
 THREAD_MODE="${THREAD_MODE:-}"
 CYCLE_TIME="${CYCLE_TIME:-}"
@@ -58,6 +59,11 @@ fi
 # Log verbosity (--verbose or --quiet)
 if [ -n "$VERBOSE" ]; then
     CMD+=($VERBOSE)
+fi
+
+# Minimal UPnP mode (no position polling, no events)
+if [ -n "$MINIMAL_UPNP" ] && [ "$MINIMAL_UPNP" = "1" ]; then
+    CMD+=("--minimal-upnp")
 fi
 
 # Advanced Diretta settings (only if specified)
