@@ -1462,17 +1462,11 @@ setup_webui() {
         return 0
     fi
 
-    echo ""
-    if ! confirm "Install web configuration UI (accessible on port 8080)?"; then
-        print_info "Skipping web UI installation"
-        return 0
-    fi
-
     # Check Python 3
     if ! command -v python3 &>/dev/null; then
-        print_error "Python 3 is required for the web UI"
+        print_warning "Python 3 not found, skipping web UI installation"
         print_info "Install with: sudo dnf install python3  (or sudo apt install python3)"
-        return 1
+        return 0
     fi
 
     print_info "Installing web UI..."
