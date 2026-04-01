@@ -429,6 +429,7 @@ sudo apt install build-essential libavformat-dev libavcodec-dev libavutil-dev li
 - [x] UAPP async Play — `onPlay` callback launched asynchronously for fast HTTP 200 response
 - [x] UAPP SCPD fix — added missing AbsTime/RelCount/AbsCount to GetPositionInfo SCPD declaration
 - [x] Minimal UPnP mode (`--minimal-upnp`) — disables position thread and event notifications
+- [x] Track restart fix — removed same-URI shortcut that prevented restarting track from beginning
 
 ### Potential Future Work
 - [ ] AVX-512 format conversions (currently only memcpy uses AVX-512)
