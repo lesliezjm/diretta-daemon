@@ -1,18 +1,13 @@
 #!/bin/bash
-# Diretta UPnP Renderer - Startup Wrapper Script
-# This script reads configuration and starts the renderer with appropriate options
+# Diretta Host Daemon - Startup Wrapper Script
+# This script reads configuration and starts the daemon with appropriate options
 
 set -e
 
 # Default values (can be overridden by config file)
-# v2.1.10: Aligned variable names with CLI (KEY → --key mapping)
-# Old names (RENDERER_NAME, NETWORK_INTERFACE, MTU_OVERRIDE) still supported as fallback
 TARGET="${TARGET:-1}"
-PORT="${PORT:-4005}"
-NAME="${NAME:-${RENDERER_NAME:-}}"
-GAPLESS="${GAPLESS:-}"
+SOCKET_PATH="${SOCKET_PATH:-/tmp/diretta-renderer.sock}"
 VERBOSE="${VERBOSE:-}"
-MINIMAL_UPNP="${MINIMAL_UPNP:-}"
 INTERFACE="${INTERFACE:-${NETWORK_INTERFACE:-}}"
 THREAD_MODE="${THREAD_MODE:-}"
 CYCLE_TIME="${CYCLE_TIME:-}"
@@ -28,7 +23,7 @@ IO_SCHED_CLASS="${IO_SCHED_CLASS:-realtime}"
 IO_SCHED_PRIORITY="${IO_SCHED_PRIORITY:-0}"
 RT_PRIORITY="${RT_PRIORITY:-50}"
 
-RENDERER_BIN="/opt/diretta-renderer-upnp/DirettaRendererUPnP"
+RENDERER_BIN="/opt/diretta-renderer/DirettaRenderer"
 
 # Build command as array (preserves arguments with spaces)
 CMD=("$RENDERER_BIN")
@@ -36,36 +31,20 @@ CMD=("$RENDERER_BIN")
 # Basic options
 CMD+=("--target" "$TARGET")
 
-# Renderer name (supports spaces, e.g., "Devialet Target")
-if [ -n "$NAME" ]; then
-    CMD+=("--name" "$NAME")
+# IPC socket path
+if [ -n "$SOCKET_PATH" ]; then
+    CMD+=("--socket-path" "$SOCKET_PATH")
 fi
 
-# UPnP port (if specified)
-if [ -n "$PORT" ]; then
-    CMD+=("--port" "$PORT")
-fi
-
-# Network interface option (CRITICAL for multi-homed systems)
-# --interface accepts both interface names (eth0) and IP addresses (192.168.1.32)
+# Network interface option (for multi-homed systems)
 if [ -n "$INTERFACE" ]; then
     echo "Binding to network interface: $INTERFACE"
     CMD+=("--interface" "$INTERFACE")
 fi
 
-# Gapless
-if [ -n "$GAPLESS" ]; then
-    CMD+=($GAPLESS)
-fi
-
 # Log verbosity (--verbose or --quiet)
 if [ -n "$VERBOSE" ]; then
     CMD+=($VERBOSE)
-fi
-
-# Minimal UPnP mode (no position polling, no events)
-if [ -n "$MINIMAL_UPNP" ] && [ "$MINIMAL_UPNP" = "1" ]; then
-    CMD+=("--minimal-upnp")
 fi
 
 # Advanced Diretta settings (only if specified)
@@ -111,17 +90,15 @@ fi
 
 # Apply I/O scheduling
 if [ -n "$IO_SCHED_CLASS" ]; then
-    # Map class name to ionice class number
     case "$IO_SCHED_CLASS" in
-        realtime|1)  IONICE_CLASS=1 ;;
+        realtime|1)    IONICE_CLASS=1 ;;
         best-effort|2) IONICE_CLASS=2 ;;
-        idle|3)      IONICE_CLASS=3 ;;
-        *)           IONICE_CLASS="" ;;
+        idle|3)        IONICE_CLASS=3 ;;
+        *)             IONICE_CLASS="" ;;
     esac
 
     if [ -n "$IONICE_CLASS" ]; then
         if [ "$IONICE_CLASS" = "3" ]; then
-            # idle class has no priority level
             EXEC_PREFIX=("ionice" "-c" "$IONICE_CLASS" "${EXEC_PREFIX[@]}")
         else
             EXEC_PREFIX=("ionice" "-c" "$IONICE_CLASS" "-n" "${IO_SCHED_PRIORITY:-0}" "${EXEC_PREFIX[@]}")
@@ -131,12 +108,12 @@ fi
 
 # Log the command being executed
 echo "════════════════════════════════════════════════════════"
-echo "  Starting Diretta UPnP Renderer"
+echo "  Starting Diretta Host Daemon"
 echo "════════════════════════════════════════════════════════"
 echo ""
 echo "Configuration:"
 echo "  Target:            $TARGET"
-echo "  Name:              ${NAME:-Diretta Renderer (default)}"
+echo "  Socket:            $SOCKET_PATH"
 echo "  Network Interface: ${INTERFACE:-auto-detect}"
 echo "  Nice level:        $NICE_LEVEL"
 echo "  I/O scheduling:    $IO_SCHED_CLASS (priority $IO_SCHED_PRIORITY)"

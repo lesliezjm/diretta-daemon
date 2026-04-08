@@ -1,9 +1,9 @@
 /**
  * @file DirettaRenderer.h
- * @brief Simplified Diretta UPnP Renderer
+ * @brief Diretta Host Daemon - IPC controlled audio renderer
  *
- * Refactored to use unified DirettaSync class.
- * Connection and format management delegated to DirettaSync.
+ * Refactored from DirettaRendererUPnP to provide Unix socket IPC interface
+ * for external music player integration. Uses unified DirettaSync class.
  */
 
 #pragma once
@@ -18,17 +18,17 @@
 #include <iostream>
 
 // Forward declarations
-class UPnPDevice;
 class AudioEngine;
 class DirettaSync;
 struct AudioFormat;
+struct DirettaConfig;
+
+#include "IPCServer.h"
 
 class DirettaRenderer {
 public:
     struct Config {
-        std::string name = "Diretta UPnP Renderer";
-        int port = 49152;
-        std::string uuid;
+        std::string socketPath = "/tmp/diretta-renderer.sock";
         bool gaplessEnabled = true;
         int targetIndex = -1;  // -1 = interactive, >= 0 = specific
         std::string networkInterface;  // Empty = auto-detect
@@ -59,23 +59,28 @@ public:
 private:
     // Thread functions
     void audioThreadFunc();
-    void upnpThreadFunc();
     void positionThreadFunc();
 
     // Helper to wait for audio callback completion
     void waitForCallbackComplete();
 
+    // Build status snapshot for IPC queries
+    IPCServer::StatusSnapshot buildStatusSnapshot();
+
+    // Select and connect to a Diretta target (disables previous if any)
+    bool selectTarget(int targetIndex, std::atomic<bool>* stopSignal = nullptr);
+
     // Configuration
     Config m_config;
+    std::unique_ptr<struct DirettaConfig> m_syncConfig;
 
     // Components
-    std::unique_ptr<UPnPDevice> m_upnp;
+    std::unique_ptr<IPCServer> m_ipc;
     std::unique_ptr<AudioEngine> m_audioEngine;
     std::unique_ptr<DirettaSync> m_direttaSync;
 
     // Threads
     std::thread m_audioThread;
-    std::thread m_upnpThread;
     std::thread m_positionThread;
 
     // State
@@ -84,7 +89,6 @@ private:
 
     // Current track info
     std::string m_currentURI;
-    std::string m_currentMetadata;
 
     // Callback synchronization (lock-free for hot path)
     std::atomic<bool> m_callbackRunning{false};

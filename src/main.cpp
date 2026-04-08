@@ -1,6 +1,6 @@
 /**
  * @file main.cpp
- * @brief Main entry point for Diretta UPnP Renderer (Simplified Architecture)
+ * @brief Main entry point for Diretta Host Daemon
  */
 
 #include "DirettaRenderer.h"
@@ -14,20 +14,18 @@
 #include <chrono>
 #include <iomanip>
 
-#define RENDERER_VERSION "2.1.10"
+#define RENDERER_VERSION "3.0.0"
 #define RENDERER_BUILD_DATE __DATE__
 #define RENDERER_BUILD_TIME __TIME__
 
 std::unique_ptr<DirettaRenderer> g_renderer;
 std::atomic<bool> g_running{true};
 
-// Async logging infrastructure (A3 optimization)
-// Declared here (before shutdownAsyncLogging) to avoid forward reference
+// Async logging infrastructure
 LogRing* g_logRing = nullptr;
 std::atomic<bool> g_logDrainStop{false};
 std::thread g_logDrainThread;
 
-// Cleanup async logging thread (must be called before exit)
 void shutdownAsyncLogging() {
     if (g_logRing) {
         g_logDrainStop.store(true, std::memory_order_release);
@@ -56,22 +54,18 @@ void statsSignalHandler(int /*signal*/) {
 }
 
 bool g_verbose = false;
-bool g_minimalUPnP = false;
 int g_rtPriority = 50;
 LogLevel g_logLevel = LogLevel::INFO;
 
 void logDrainThreadFunc() {
     LogEntry entry;
     while (!g_logDrainStop.load(std::memory_order_acquire)) {
-        // Drain all pending log entries
         while (g_logRing && g_logRing->pop(entry)) {
             std::cout << "[" << (entry.timestamp_us / 1000) << "ms] "
                       << entry.message << std::endl;
         }
-        // Sleep briefly to avoid busy-wait
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
-    // Final drain on shutdown
     while (g_logRing && g_logRing->pop(entry)) {
         std::cout << "[" << (entry.timestamp_us / 1000) << "ms] "
                   << entry.message << std::endl;
@@ -86,39 +80,27 @@ void listTargets() {
     DirettaSync::listTargets();
 
     std::cout << "\nUsage:\n";
-    std::cout << "   Target #1: sudo ./bin/DirettaRendererUPnP --target 1\n";
-    std::cout << "   Target #2: sudo ./bin/DirettaRendererUPnP --target 2\n";
+    std::cout << "   Target #1: sudo ./bin/DirettaRenderer --target 1\n";
+    std::cout << "   Target #2: sudo ./bin/DirettaRenderer --target 2\n";
     std::cout << std::endl;
 }
 
 DirettaRenderer::Config parseArguments(int argc, char* argv[]) {
     DirettaRenderer::Config config;
 
-    config.name = "Diretta Renderer";
-    config.port = 0;
-    config.gaplessEnabled = true;
-
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
 
-        if ((arg == "--name" || arg == "-n") && i + 1 < argc) {
-            config.name = argv[++i];
-        }
-        else if ((arg == "--port" || arg == "-p") && i + 1 < argc) {
-            config.port = std::atoi(argv[++i]);
-        }
-        else if (arg == "--uuid" && i + 1 < argc) {
-            config.uuid = argv[++i];
-        }
-        else if (arg == "--no-gapless") {
-            config.gaplessEnabled = false;
+        if ((arg == "--socket-path" || arg == "-s") && i + 1 < argc) {
+            config.socketPath = argv[++i];
         }
         else if ((arg == "--target" || arg == "-t") && i + 1 < argc) {
-            config.targetIndex = std::atoi(argv[++i]) - 1;
-            if (config.targetIndex < 0) {
-                std::cerr << "Invalid target index. Must be >= 1" << std::endl;
+            int userIndex = std::atoi(argv[++i]);
+            if (userIndex < 0) {
+                std::cerr << "Invalid target index. Must be >= 0 (0 = no target)" << std::endl;
                 exit(1);
             }
+            config.targetIndex = (userIndex == 0) ? -1 : userIndex - 1;
         }
         else if (arg == "--interface" && i + 1 < argc) {
             config.networkInterface = argv[++i];
@@ -129,10 +111,9 @@ DirettaRenderer::Config parseArguments(int argc, char* argv[]) {
         }
         else if (arg == "--version" || arg == "-V") {
             std::cout << "═══════════════════════════════════════════════════════" << std::endl;
-            std::cout << "  Diretta UPnP Renderer - Version " << RENDERER_VERSION << std::endl;
+            std::cout << "  Diretta Host Daemon v" << RENDERER_VERSION << std::endl;
             std::cout << "═══════════════════════════════════════════════════════" << std::endl;
             std::cout << "Build: " << RENDERER_BUILD_DATE << " " << RENDERER_BUILD_TIME << std::endl;
-            std::cout << "Architecture: Simplified (DirettaSync unified)" << std::endl;
             std::cout << "═══════════════════════════════════════════════════════" << std::endl;
             exit(0);
         }
@@ -144,10 +125,6 @@ DirettaRenderer::Config parseArguments(int argc, char* argv[]) {
         else if (arg == "--quiet" || arg == "-q") {
             g_logLevel = LogLevel::WARN;
             std::cout << "Quiet mode enabled (log level: WARN)" << std::endl;
-        }
-        else if (arg == "--minimal-upnp") {
-            g_minimalUPnP = true;
-            std::cout << "Minimal UPnP mode enabled (no position polling, no events)" << std::endl;
         }
         // Advanced Diretta SDK settings
         else if (arg == "--thread-mode" && i + 1 < argc) {
@@ -188,34 +165,27 @@ DirettaRenderer::Config parseArguments(int argc, char* argv[]) {
             }
         }
         else if (arg == "--help" || arg == "-h") {
-            std::cout << "Diretta UPnP Renderer (Simplified Architecture)\n\n"
+            std::cout << "Diretta Host Daemon (IPC controlled)\n\n"
                       << "Usage: " << argv[0] << " [options]\n\n"
                       << "Options:\n"
-                      << "  --name, -n <name>     Renderer name (default: Diretta Renderer)\n"
-                      << "  --port, -p <port>     UPnP port (default: auto)\n"
-                      << "  --uuid <uuid>         Device UUID (default: auto-generated)\n"
-                      << "  --no-gapless          Disable gapless playback\n"
-                      << "  --target, -t <index>  Select Diretta target by index (1, 2, 3...)\n"
-                      << "  --interface <name>    Network interface to bind (e.g., eth0)\n"
-                      << "  --list-targets, -l    List available Diretta targets and exit\n"
-                      << "  --verbose, -v         Enable verbose debug output (log level: DEBUG)\n"
-                      << "  --quiet, -q           Quiet mode - only errors and warnings (log level: WARN)\n"
-                      << "  --minimal-upnp        Minimal UPnP mode (no position polling, no events)\n"
-                      << "  --version, -V         Show version information\n"
-                      << "  --help, -h            Show this help\n"
+                      << "  --socket-path, -s <path>  IPC socket path (default: /tmp/diretta-renderer.sock)\n"
+                      << "  --target, -t <index>      Select Diretta target by index (1, 2, 3...; 0=none, use IPC)\n"
+                      << "  --interface <name>        Network interface to bind (e.g., eth0)\n"
+                      << "  --list-targets, -l        List available Diretta targets and exit\n"
+                      << "  --verbose, -v             Enable verbose debug output (log level: DEBUG)\n"
+                      << "  --quiet, -q               Quiet mode - only errors and warnings (log level: WARN)\n"
+                      << "  --version, -V             Show version information\n"
+                      << "  --help, -h                Show this help\n"
                       << "\n"
                       << "Advanced Diretta SDK settings:\n"
                       << "  --thread-mode <mode>       SDK thread mode bitmask (default: 1=CRITICAL)\n"
-                      << "                             Flags: 1=CRITICAL, 2=NOSHORTSLEEP, 4=NOSLEEP4CORE,\n"
-                      << "                             8=SOCKETNOBLOCK, 16=OCCUPIED, 2048=NOSLEEPFORCE,\n"
-                      << "                             8192=NOJUMBOFRAME, 16384=NOFIREWALL, 32768=NORAWSOCKET\n"
                       << "  --cycle-time <us>          Max cycle time in microseconds (333-10000, default: auto)\n"
                       << "  --cycle-min-time <us>      Min cycle time in microseconds (random mode only)\n"
                       << "  --info-cycle <us>          Info packet cycle in microseconds (default: 100000)\n"
                       << "  --transfer-mode <mode>     Transfer mode: auto, varmax, varauto, fixauto, random\n"
-                      << "  --target-profile-limit <us> Target profile limit time (0=SelfProfile (stable), default: 0, >0=experimental)\n"
+                      << "  --target-profile-limit <us> Target profile limit (0=SelfProfile, default: 0)\n"
                       << "  --mtu <bytes>              MTU override (default: auto-detect)\n"
-                      << "  --rt-priority <1-99>       SCHED_FIFO real-time priority for worker thread (default: 50)\n"
+                      << "  --rt-priority <1-99>       SCHED_FIFO real-time priority (default: 50)\n"
                       << std::endl;
             exit(0);
         }
@@ -240,7 +210,7 @@ int main(int argc, char* argv[]) {
     signal(SIGUSR1, statsSignalHandler);
 
     std::cout << "═══════════════════════════════════════════════════════\n"
-              << "  Diretta UPnP Renderer v" << RENDERER_VERSION << "\n"
+              << "  Diretta Host Daemon v" << RENDERER_VERSION << "\n"
               << "═══════════════════════════════════════════════════════\n"
               << std::endl;
 
@@ -274,24 +244,22 @@ int main(int argc, char* argv[]) {
 
     DirettaRenderer::Config config = parseArguments(argc, argv);
 
-    // Initialize async logging ring buffer (A3 optimization)
-    // Only active in verbose mode to avoid overhead in production
+    // Initialize async logging ring buffer (verbose mode only)
     if (g_verbose) {
         g_logRing = new LogRing();
         g_logDrainThread = std::thread(logDrainThreadFunc);
     }
 
     std::cout << "Configuration:" << std::endl;
-    std::cout << "  Name:     " << config.name << std::endl;
-    std::cout << "  Port:     " << (config.port == 0 ? "auto" : std::to_string(config.port)) << std::endl;
-    std::cout << "  Gapless:  " << (config.gaplessEnabled ? "enabled" : "disabled") << std::endl;
-    if (g_minimalUPnP) {
-        std::cout << "  UPnP:     minimal (no position polling, no events)" << std::endl;
+    std::cout << "  Socket:   " << config.socketPath << std::endl;
+    if (config.targetIndex >= 0) {
+        std::cout << "  Target:   #" << (config.targetIndex + 1) << std::endl;
+    } else {
+        std::cout << "  Target:   (none — use IPC select_target)" << std::endl;
     }
     if (!config.networkInterface.empty()) {
         std::cout << "  Network:  " << config.networkInterface << std::endl;
     }
-    std::cout << "  UUID:     " << config.uuid << std::endl;
     std::cout << std::endl;
 
     try {
@@ -301,7 +269,6 @@ int main(int argc, char* argv[]) {
 
         if (!g_renderer->start(&g_running)) {
             if (!g_running.load(std::memory_order_acquire)) {
-                // Cancelled by signal — clean exit
                 shutdownAsyncLogging();
                 return 0;
             }
@@ -311,9 +278,8 @@ int main(int argc, char* argv[]) {
         }
 
         std::cout << "Renderer started!" << std::endl;
-
         std::cout << std::endl;
-        std::cout << "Waiting for UPnP control points..." << std::endl;
+        std::cout << "Listening on " << config.socketPath << std::endl;
         std::cout << "(Press Ctrl+C to stop)" << std::endl;
         std::cout << std::endl;
 

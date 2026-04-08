@@ -1,15 +1,14 @@
 [Unit]
-Description=Diretta UPnP Renderer
-Documentation=https://github.com/cometdom/DirettaRendererUPnP
+Description=Diretta Host Daemon (IPC controlled)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/opt/diretta-renderer-upnp
+WorkingDirectory=/opt/diretta-renderer
 EnvironmentFile=-/etc/default/diretta-renderer
-ExecStart=/opt/diretta-renderer-upnp/start-renderer.sh
+ExecStart=/opt/diretta-renderer/start-renderer.sh
 
 # Restart policy
 Restart=on-failure
@@ -30,8 +29,8 @@ CapabilityBoundingSet=CAP_NET_RAW CAP_NET_ADMIN CAP_SYS_NICE
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
-ReadOnlyPaths=/opt/diretta-renderer-upnp
-ReadWritePaths=/var/log
+ReadOnlyPaths=/opt/diretta-renderer
+ReadWritePaths=/var/log /tmp
 
 # --- Device and kernel isolation ---
 PrivateDevices=true

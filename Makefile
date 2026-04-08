@@ -145,8 +145,7 @@ ACQUA_LIB_NAME   = libACQUA_$(FULL_VARIANT)$(NOLOG_SUFFIX).a
 
 $(info )
 $(info ═══════════════════════════════════════════════════════)
-$(info   Diretta UPnP Renderer - SIMPLIFIED ARCHITECTURE)
-$(info   DirettaSync: Unified adapter (DirettaSyncAdapter+DirettaOutput))
+$(info   Diretta Host Daemon - IPC controlled)
 $(info ═══════════════════════════════════════════════════════)
 $(info Variant:       $(FULL_VARIANT))
 $(info Library:       $(DIRETTA_LIB_NAME))
@@ -365,22 +364,8 @@ endif
 endif
 $(info )
 
-# Detect libupnp include path via pkg-config, fallback to standard paths
-UPNP_CFLAGS := $(shell pkg-config --cflags libupnp 2>/dev/null)
-ifeq ($(UPNP_CFLAGS),)
-    # pkg-config not available or libupnp not found - try standard locations
-    ifneq (,$(wildcard /usr/include/upnp/upnp.h))
-        UPNP_CFLAGS =
-    else ifneq (,$(wildcard /usr/local/include/upnp/upnp.h))
-        UPNP_CFLAGS = -I/usr/local/include
-    else
-        $(warning libupnp headers not found. Install libupnp-dev or set UPNP_CFLAGS manually.)
-    endif
-endif
-
 INCLUDES = \
     $(FFMPEG_INCLUDES) \
-    $(UPNP_CFLAGS) \
     -I/usr/local/include \
     -I. \
     -Isrc \
@@ -392,8 +377,6 @@ LDFLAGS += \
     -L$(SDK_PATH)/lib
 
 LIBS = \
-    -lupnp \
-    -lixml \
     -lpthread \
     -lDirettaHost_$(FULL_VARIANT)$(NOLOG_SUFFIX) \
     -lavformat \
@@ -421,7 +404,7 @@ SOURCES = \
     $(SRCDIR)/DirettaRenderer.cpp \
     $(SRCDIR)/AudioEngine.cpp \
     $(SRCDIR)/DirettaSync.cpp \
-    $(SRCDIR)/UPnPDevice.cpp
+    $(SRCDIR)/IPCServer.cpp
 
 # C sources (AVX optimized memcpy - x86 with AVX2 only)
 # Skip for baseline x86-64-v2 which doesn't have AVX2
@@ -431,12 +414,15 @@ else
     C_SOURCES =
 endif
 
+# glibc compatibility shim for SDK compiled with glibc 2.38+
+C_SOURCES += $(SRCDIR)/glibc_compat.c
+
 OBJECTS = $(SOURCES:$(SRCDIR)/%.cpp=$(OBJDIR)/%.o)
 C_OBJECTS = $(C_SOURCES:$(SRCDIR)/%.c=$(OBJDIR)/%.o)
 C_DEPENDS = $(C_OBJECTS:.o=.d)
 DEPENDS = $(OBJECTS:.o=.d) $(C_DEPENDS)
 
-TARGET = $(BINDIR)/DirettaRendererUPnP
+TARGET = $(BINDIR)/DirettaRenderer
 
 # ============================================
 # Build Rules
@@ -447,7 +433,7 @@ TARGET = $(BINDIR)/DirettaRendererUPnP
 all: $(TARGET)
 	@echo ""
 	@echo "Build complete: $(TARGET)"
-	@echo "Architecture: Simplified (DirettaSync unified)"
+	@echo "Architecture: IPC controlled (DirettaSync unified)"
 
 $(TARGET): $(OBJECTS) $(C_OBJECTS) | $(BINDIR)
 	@echo "Linking $(TARGET)..."

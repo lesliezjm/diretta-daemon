@@ -391,6 +391,44 @@ void DirettaSync::listTargets() {
     find.close();
 }
 
+std::vector<DirettaSync::TargetInfo> DirettaSync::discoverTargets() {
+    std::vector<TargetInfo> result;
+
+    DIRETTA::Find::Setting findSettings;
+    findSettings.Loopback = false;
+    findSettings.ProductID = 0;
+
+    DIRETTA::Find find(findSettings);
+    if (!find.open()) {
+        return result;
+    }
+
+    DIRETTA::Find::PortResalts results;
+    if (!find.findOutput(results) || results.empty()) {
+        find.close();
+        return result;
+    }
+
+    int index = 1;
+    for (const auto& target : results) {
+        const auto& info = target.second;
+        TargetInfo ti;
+        ti.index = index++;
+        ti.name = info.targetName;
+        ti.output = info.outputName;
+        ti.portIn = info.PI;
+        ti.portOut = info.PO;
+        ti.multiport = info.multiport;
+        ti.config = info.config;
+        ti.version = info.version;
+        ti.productId = info.productID;
+        result.push_back(std::move(ti));
+    }
+
+    find.close();
+    return result;
+}
+
 void DirettaSync::logSinkCapabilities() {
     const auto& info = getSinkInfo();
     std::cout << "[DirettaSync] Sink capabilities:" << std::endl;

@@ -1,13 +1,14 @@
 /**
  * @file DirettaRenderer.cpp
- * @brief Simplified Diretta UPnP Renderer implementation
+ * @brief Diretta Host Daemon - IPC controlled audio renderer
  *
- * Connection and format management delegated to DirettaSync.
+ * Refactored from DirettaRendererUPnP. UPnP layer replaced with Unix socket IPC.
+ * Audio callback, DirettaSync lifecycle, and flow control preserved exactly.
  */
 
 #include "DirettaRenderer.h"
 #include "DirettaSync.h"
-#include "UPnPDevice.hpp"
+#include "IPCServer.h"
 #include "AudioEngine.h"
 #include <chrono>
 #include <ctime>
@@ -39,24 +40,6 @@ namespace FlowControl {
 static constexpr int IDLE_RELEASE_TIMEOUT_S = 5;
 
 //=============================================================================
-// UUID Generation
-//=============================================================================
-
-static std::string generateUUID() {
-    char hostname[256];
-    if (gethostname(hostname, sizeof(hostname)) != 0) {
-        strcpy(hostname, "diretta-renderer");
-    }
-
-    std::hash<std::string> hasher;
-    size_t hash = hasher(std::string(hostname));
-
-    std::stringstream ss;
-    ss << "diretta-renderer-" << std::hex << hash;
-    return ss.str();
-}
-
-//=============================================================================
 // Time String Parsing
 //=============================================================================
 
@@ -79,7 +62,6 @@ static double parseTimeString(const std::string& timeStr) {
 //=============================================================================
 
 DirettaRenderer::Config::Config() {
-    uuid = generateUUID();
 }
 
 //=============================================================================
@@ -114,6 +96,37 @@ void DirettaRenderer::waitForCallbackComplete() {
 }
 
 //=============================================================================
+// Status Snapshot
+//=============================================================================
+
+IPCServer::StatusSnapshot DirettaRenderer::buildStatusSnapshot() {
+    IPCServer::StatusSnapshot s;
+
+    if (!m_audioEngine) {
+        s.transport = "stopped";
+        return s;
+    }
+
+    auto state = m_audioEngine->getState();
+    s.transport = (state == AudioEngine::State::PLAYING) ? "playing" :
+                  (state == AudioEngine::State::PAUSED) ? "paused" : "stopped";
+
+    const auto& info = m_audioEngine->getCurrentTrackInfo();
+    s.path = info.uri;
+    s.position = m_audioEngine->getPosition();
+    s.duration = (info.sampleRate > 0) ? static_cast<double>(info.duration) / info.sampleRate : 0.0;
+    s.sampleRate = info.sampleRate;
+    s.bitDepth = info.bitDepth;
+    s.channels = info.channels;
+    s.format = info.isDSD ? "DSD" : "PCM";
+    s.dsdRate = info.isDSD ? info.dsdRate : 0;
+    s.bufferLevel = m_direttaSync ? m_direttaSync->getBufferLevel() : 0.0f;
+    s.trackNumber = m_audioEngine->getTrackNumber();
+
+    return s;
+}
+
+//=============================================================================
 // Start
 //=============================================================================
 
@@ -126,105 +139,80 @@ bool DirettaRenderer::start(std::atomic<bool>* stopSignal) {
     DEBUG_LOG("[DirettaRenderer] Starting...");
 
     try {
-        // Create and enable DirettaSync
+        //=====================================================================
+        // Create and enable DirettaSync (PRESERVED EXACTLY)
+        //=====================================================================
+
         m_direttaSync = std::make_unique<DirettaSync>();
         m_direttaSync->setTargetIndex(m_config.targetIndex);
 
-        DirettaConfig syncConfig;
-
-        // Apply user-specified SDK settings (override defaults)
+        // Build sync config (used by selectTarget and startup enable)
+        m_syncConfig = std::make_unique<DirettaConfig>();
         if (m_config.threadMode >= 0)
-            syncConfig.threadMode = m_config.threadMode;
+            m_syncConfig->threadMode = m_config.threadMode;
         if (m_config.cycleTime >= 0) {
-            syncConfig.cycleTime = static_cast<unsigned int>(m_config.cycleTime);
-            syncConfig.cycleTimeAuto = false;
+            m_syncConfig->cycleTime = static_cast<unsigned int>(m_config.cycleTime);
+            m_syncConfig->cycleTimeAuto = false;
         }
         if (m_config.infoCycle >= 0)
-            syncConfig.infoCycle = static_cast<unsigned int>(m_config.infoCycle);
+            m_syncConfig->infoCycle = static_cast<unsigned int>(m_config.infoCycle);
         if (m_config.cycleMinTime >= 0)
-            syncConfig.cycleMinTime = static_cast<unsigned int>(m_config.cycleMinTime);
+            m_syncConfig->cycleMinTime = static_cast<unsigned int>(m_config.cycleMinTime);
         if (m_config.mtu >= 0)
-            syncConfig.mtu = static_cast<unsigned int>(m_config.mtu);
+            m_syncConfig->mtu = static_cast<unsigned int>(m_config.mtu);
         if (!m_config.transferMode.empty()) {
             if (m_config.transferMode == "varmax")
-                syncConfig.transferMode = DirettaTransferMode::VAR_MAX;
+                m_syncConfig->transferMode = DirettaTransferMode::VAR_MAX;
             else if (m_config.transferMode == "varauto")
-                syncConfig.transferMode = DirettaTransferMode::VAR_AUTO;
+                m_syncConfig->transferMode = DirettaTransferMode::VAR_AUTO;
             else if (m_config.transferMode == "fixauto")
-                syncConfig.transferMode = DirettaTransferMode::FIX_AUTO;
+                m_syncConfig->transferMode = DirettaTransferMode::FIX_AUTO;
             else if (m_config.transferMode == "random")
-                syncConfig.transferMode = DirettaTransferMode::RANDOM;
+                m_syncConfig->transferMode = DirettaTransferMode::RANDOM;
             else
-                syncConfig.transferMode = DirettaTransferMode::AUTO;
+                m_syncConfig->transferMode = DirettaTransferMode::AUTO;
         }
         if (m_config.targetProfileLimitTime >= 0)
-            syncConfig.targetProfileLimitTime = static_cast<unsigned int>(m_config.targetProfileLimitTime);
+            m_syncConfig->targetProfileLimitTime = static_cast<unsigned int>(m_config.targetProfileLimitTime);
 
         // Log non-default SDK settings
         if (m_config.threadMode >= 0)
-            std::cout << "[DirettaRenderer] Thread mode: " << syncConfig.threadMode << std::endl;
+            std::cout << "[DirettaRenderer] Thread mode: " << m_syncConfig->threadMode << std::endl;
         if (m_config.cycleTime >= 0)
-            std::cout << "[DirettaRenderer] Cycle time: " << syncConfig.cycleTime << " us (auto disabled)" << std::endl;
+            std::cout << "[DirettaRenderer] Cycle time: " << m_syncConfig->cycleTime << " us (auto disabled)" << std::endl;
         if (m_config.infoCycle >= 0)
-            std::cout << "[DirettaRenderer] Info cycle: " << syncConfig.infoCycle << " us" << std::endl;
+            std::cout << "[DirettaRenderer] Info cycle: " << m_syncConfig->infoCycle << " us" << std::endl;
         if (m_config.cycleMinTime >= 0)
-            std::cout << "[DirettaRenderer] Cycle min time: " << syncConfig.cycleMinTime << " us" << std::endl;
+            std::cout << "[DirettaRenderer] Cycle min time: " << m_syncConfig->cycleMinTime << " us" << std::endl;
         if (!m_config.transferMode.empty())
             std::cout << "[DirettaRenderer] Transfer mode: " << m_config.transferMode << std::endl;
         if (m_config.mtu >= 0)
-            std::cout << "[DirettaRenderer] MTU override: " << syncConfig.mtu << std::endl;
+            std::cout << "[DirettaRenderer] MTU override: " << m_syncConfig->mtu << std::endl;
         if (m_config.targetProfileLimitTime >= 0)
-            std::cout << "[DirettaRenderer] Target profile limit: " << syncConfig.targetProfileLimitTime
-                      << " us (" << (syncConfig.targetProfileLimitTime > 0 ? "TargetProfile" : "SelfProfile") << ")" << std::endl;
+            std::cout << "[DirettaRenderer] Target profile limit: " << m_syncConfig->targetProfileLimitTime
+                      << " us (" << (m_syncConfig->targetProfileLimitTime > 0 ? "TargetProfile" : "SelfProfile") << ")" << std::endl;
 
-        if (!m_direttaSync->enable(syncConfig, stopSignal)) {
-            std::cerr << "[DirettaRenderer] Failed to enable DirettaSync" << std::endl;
-            return false;
-        }
-
-        std::cout << "[DirettaRenderer] Diretta Target ready" << std::endl;
-
-        // Pre-connect with default format to warm up Diretta pipeline
-        // This eliminates the ~5s glitch on first play
-        {
-            AudioFormat warmupFmt;
-            warmupFmt.sampleRate = 44100;
-            warmupFmt.bitDepth = 24;
-            warmupFmt.channels = 2;
-            warmupFmt.isDSD = false;
-            std::cout << "[DirettaRenderer] Pre-connecting Diretta (warmup)..." << std::endl;
-            if (m_direttaSync->open(warmupFmt)) {
-                m_direttaSync->stopPlayback(true);
-                std::cout << "[DirettaRenderer] Diretta pre-connected (warmup done)" << std::endl;
-            } else {
-                std::cerr << "[DirettaRenderer] Warmup pre-connect failed (non-fatal)" << std::endl;
+        // If target specified at startup, enable immediately (backward compat)
+        // Otherwise, daemon starts idle — use select_target via IPC
+        if (m_config.targetIndex >= 0) {
+            if (!selectTarget(m_config.targetIndex, stopSignal)) {
+                return false;
             }
+        } else {
+            std::cout << "[DirettaRenderer] No target specified — use IPC select_target to choose" << std::endl;
         }
 
-        // Create UPnP device
-        UPnPDevice::Config upnpConfig;
-        upnpConfig.friendlyName = m_config.name;
-        upnpConfig.manufacturer = "DIY Audio";
-        upnpConfig.modelName = "Diretta UPnP Renderer";
-        upnpConfig.uuid = m_config.uuid;
-        upnpConfig.port = m_config.port;
-        upnpConfig.networkInterface = m_config.networkInterface;
-        upnpConfig.gaplessEnabled = m_config.gaplessEnabled;
+        //=====================================================================
+        // Create IPC Server (replaces UPnPDevice)
+        //=====================================================================
 
-        m_upnp = std::make_unique<UPnPDevice>(upnpConfig);
+        m_ipc = std::make_unique<IPCServer>();
 
         // Create AudioEngine
         m_audioEngine = std::make_unique<AudioEngine>();
 
-        // Set real-time position callback for accurate GetPositionInfo responses
-        // (bypasses 1s position thread cache - fixes UAPP compatibility)
-        m_upnp->setPositionCallback([this]() -> double {
-            if (m_audioEngine) return m_audioEngine->getPosition();
-            return 0.0;
-        });
-
         //=====================================================================
-        // Audio Callback - Simplified
+        // Audio Callback (PRESERVED EXACTLY)
         //=====================================================================
 
         m_audioEngine->setAudioCallback(
@@ -386,23 +374,17 @@ bool DirettaRenderer::start(std::atomic<bool>* stopSignal) {
         );
 
         //=====================================================================
-        // Track Change Callback
+        // Track Change Callback (notification target changed: m_ipc)
         //=====================================================================
 
         m_audioEngine->setTrackChangeCallback(
-            [this](int trackNumber, const TrackInfo& info, const std::string& uri, const std::string& metadata) {
+            [this](int trackNumber, const TrackInfo& info, const std::string& uri, const std::string& /*metadata*/) {
                 // Keep DirettaRenderer URI in sync with AudioEngine
-                // Critical for gapless transitions where only AudioEngine::m_currentURI
-                // is updated by transitionToNextTrack(). Without this, onStop/onPlay
-                // would use a stale URI from the previous track.
                 // try_to_lock: avoids deadlock when called from onPlay → play() → openCurrentTrack()
-                // (onPlay already holds m_mutex). If lock fails, m_currentURI was already
-                // set correctly by onSetURI before onPlay.
                 {
                     std::unique_lock<std::mutex> lock(m_mutex, std::try_to_lock);
                     if (lock.owns_lock()) {
                         m_currentURI = uri;
-                        m_currentMetadata = metadata;
                     }
                 }
 
@@ -416,22 +398,24 @@ bool DirettaRenderer::start(std::atomic<bool>* stopSignal) {
                     std::cout << "/" << info.channels << "ch" << std::endl;
                 }
 
-                // Atomic gapless transition: update all track data + send single event
-                // Uses epoch counter to prevent position thread from overwriting
-                // with stale values (fixes Audirvana UI not updating on track change)
-                int durationSec = (info.sampleRate > 0) ? static_cast<int>(info.duration / info.sampleRate) : 0;
-                m_upnp->notifyGaplessTransition(uri, metadata, durationSec);
+                // Notify IPC clients of track change
+                double durationSec = (info.sampleRate > 0) ? static_cast<double>(info.duration) / info.sampleRate : 0.0;
+                std::string fmt = info.isDSD ? "DSD" : "PCM";
+                if (m_ipc) {
+                    m_ipc->notifyTrackChange(uri, info.sampleRate, info.bitDepth, info.channels, fmt, durationSec);
+                }
             }
         );
+
+        //=====================================================================
+        // Track End Callback (notification target changed: m_ipc)
+        //=====================================================================
 
         m_audioEngine->setTrackEndCallback([this]() {
             std::cout << "[DirettaRenderer] Track ended naturally" << std::endl;
 
             if (m_direttaSync) {
                 // Wait for ring buffer to drain before stopping.
-                // At EOF, the ring buffer still has ~75-150ms of audio (25-50% fill).
-                // The SDK consumer (getNewStream) pops ~2.4ms per cycle.
-                // Without this wait, stopPlayback() discards the buffered audio tail.
                 if (m_direttaSync->isPlaying()) {
                     auto drainStart = std::chrono::steady_clock::now();
                     constexpr int DRAIN_TIMEOUT_MS = 2000;
@@ -456,98 +440,95 @@ bool DirettaRenderer::start(std::atomic<bool>* stopSignal) {
                 m_direttaSync->stopPlayback(false);
 
                 // Fully release the Diretta target on playlist end
-                // This closes the SDK connection so the target can accept other sources
                 m_direttaSync->release();
             }
 
-            // Notify control point that track finished
-            // This is required for sequential playlist advancement
-            // The control point will poll GetTransportInfo, see STOPPED,
-            // and send SetAVTransportURI + Play for the next track
-            m_upnp->notifyStateChange("STOPPED");
+            // Notify IPC clients that track finished
+            if (m_ipc) {
+                m_ipc->notifyStateChange("stopped");
+            }
         });
 
         //=====================================================================
-        // UPnP Callbacks
+        // IPC Command Handlers (replace UPnP callbacks)
         //=====================================================================
 
-        UPnPDevice::Callbacks callbacks;
+        IPCServer::Callbacks ipcCallbacks;
 
-        callbacks.onSetURI = [this](const std::string& uri, const std::string& metadata) {
-            DEBUG_LOG("[DirettaRenderer] SetURI: " << uri);
-
-            // Single mutex lock for entire operation - prevents race condition where
-            // onPlay (from concurrent libupnp thread) reads stale m_currentURI between
-            // auto-stop and URI update. Same pattern as onStop handler.
-            std::lock_guard<std::mutex> lock(m_mutex);
-
-            auto currentState = m_audioEngine->getState();
-
-            // Auto-stop if playing
-            if (currentState == AudioEngine::State::PLAYING ||
-                currentState == AudioEngine::State::PAUSED) {
-
-                std::cout << "[DirettaRenderer] Auto-STOP before URI change" << std::endl;
-
-                // v2.0.1 FIX: Record stop time for DAC stabilization delay in onPlay
-                // Without this, the stabilization delay is skipped after Auto-STOP
-                m_lastStopTime = std::chrono::steady_clock::now();
-
-                m_audioEngine->stop();
-                waitForCallbackComplete();
-
-                // Don't close DirettaSync - keep connection alive for quick track transitions
-                // Format changes are handled in DirettaSync::open()
-                if (m_direttaSync && m_direttaSync->isOpen()) {
-                    // Send silence BEFORE stopping to flush Diretta pipeline
-                    // This prevents crackling on DSD→PCM or DSD rate change transitions
-                    m_direttaSync->sendPreTransitionSilence();
-                    m_direttaSync->stopPlayback(true);
-                }
-
-                m_upnp->notifyStateChange("STOPPED");
-            }
-
-            m_currentURI = uri;
-            m_currentMetadata = metadata;
-            m_audioEngine->setCurrentURI(uri, metadata);
-        };
-
-        callbacks.onSetNextURI = [this](const std::string& uri, const std::string& metadata) {
-            std::lock_guard<std::mutex> lock(m_mutex);
-            DEBUG_LOG("[DirettaRenderer] SetNextURI for gapless");
-            m_audioEngine->setNextURI(uri, metadata);
-        };
-
-        callbacks.onPlay = [this]() {
-            std::cout << "[DirettaRenderer] Play" << std::endl;
+        ipcCallbacks.onPlay = [this](const std::string& path) {
+            std::cout << "[DirettaRenderer] Play: " << path << std::endl;
             std::lock_guard<std::mutex> lock(m_mutex);
 
             // Cancel idle release timer
             m_idleTimerActive.store(false, std::memory_order_release);
             m_direttaReleased.store(false, std::memory_order_release);
 
-            // Already playing? No-op per UPnP AVTransport spec
-            // Prevents Audirvana from causing position resets or redundant opens
-            // when it sends Play() to confirm a gapless transition already in progress
-            if (m_audioEngine->getState() == AudioEngine::State::PLAYING) {
-                DEBUG_LOG("[DirettaRenderer] Already playing, ignoring Play");
+            // Auto-stop if currently playing/paused
+            auto currentState = m_audioEngine->getState();
+            if (currentState == AudioEngine::State::PLAYING ||
+                currentState == AudioEngine::State::PAUSED) {
+
+                std::cout << "[DirettaRenderer] Auto-STOP before new track" << std::endl;
+                m_lastStopTime = std::chrono::steady_clock::now();
+
+                m_audioEngine->stop();
+                waitForCallbackComplete();
+
+                if (m_direttaSync && m_direttaSync->isOpen()) {
+                    m_direttaSync->sendPreTransitionSilence();
+                    m_direttaSync->stopPlayback(true);
+                }
+
+                if (m_ipc) m_ipc->notifyStateChange("stopped");
+            }
+
+            // Set new URI and play
+            m_currentURI = path;
+            m_audioEngine->setCurrentURI(path, "");
+
+            // DAC stabilization delay
+            auto now = std::chrono::steady_clock::now();
+            auto timeSinceStop = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_lastStopTime);
+            if (timeSinceStop.count() < 100) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+
+            if (!m_audioEngine->play()) {
+                std::cerr << "[DirettaRenderer] AudioEngine::play() failed" << std::endl;
+                if (m_ipc) m_ipc->notifyStateChange("stopped");
                 return;
             }
 
-            // Resume from pause?
+            if (m_ipc) m_ipc->notifyStateChange("playing");
+        };
+
+        ipcCallbacks.onResume = [this]() {
+            std::cout << "[DirettaRenderer] Resume" << std::endl;
+            std::lock_guard<std::mutex> lock(m_mutex);
+
+            // Cancel idle release timer
+            m_idleTimerActive.store(false, std::memory_order_release);
+            m_direttaReleased.store(false, std::memory_order_release);
+
+            // Already playing? No-op
+            if (m_audioEngine->getState() == AudioEngine::State::PLAYING) {
+                DEBUG_LOG("[DirettaRenderer] Already playing, ignoring resume");
+                return;
+            }
+
+            // Resume from pause
             if (m_direttaSync && m_direttaSync->isOpen() && m_direttaSync->isPaused()) {
                 DEBUG_LOG("[DirettaRenderer] Resuming from pause");
                 m_direttaSync->resumePlayback();
                 m_audioEngine->play();
-                m_upnp->notifyStateChange("PLAYING");
+                if (m_ipc) m_ipc->notifyStateChange("playing");
                 return;
             }
 
             // Reopen track if needed
             if (m_direttaSync && !m_direttaSync->isOpen() && !m_currentURI.empty()) {
                 DEBUG_LOG("[DirettaRenderer] Reopening track");
-                m_audioEngine->setCurrentURI(m_currentURI, m_currentMetadata, true);
+                m_audioEngine->setCurrentURI(m_currentURI, "", true);
             }
 
             // DAC stabilization delay
@@ -557,20 +538,16 @@ bool DirettaRenderer::start(std::atomic<bool>* stopSignal) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
             }
 
-            // v2.0.1 FIX: Check play() return value before notifying PLAYING
-            // Without this check, control point shows PLAYING even when decoder failed to open
             if (!m_audioEngine->play()) {
                 std::cerr << "[DirettaRenderer] AudioEngine::play() failed" << std::endl;
-                m_upnp->notifyStateChange("STOPPED");
+                if (m_ipc) m_ipc->notifyStateChange("stopped");
                 return;
             }
-            // No notifyStateChange("PLAYING") here: trackChangeCallback
-            // already sent a complete event via notifyGaplessTransition()
-            // with URI, metadata, and duration. Sending another would be
-            // redundant and can cause audio hiccups on some control points.
+
+            if (m_ipc) m_ipc->notifyStateChange("playing");
         };
 
-        callbacks.onPause = [this]() {
+        ipcCallbacks.onPause = [this]() {
             std::lock_guard<std::mutex> lock(m_mutex);
             std::cout << "[DirettaRenderer] Pause" << std::endl;
 
@@ -580,14 +557,13 @@ bool DirettaRenderer::start(std::atomic<bool>* stopSignal) {
             if (m_direttaSync && m_direttaSync->isPlaying()) {
                 m_direttaSync->pausePlayback();
             }
-            m_upnp->notifyStateChange("PAUSED_PLAYBACK");
+            if (m_ipc) m_ipc->notifyStateChange("paused");
         };
 
-        callbacks.onStop = [this]() {
+        ipcCallbacks.onStop = [this]() {
             std::lock_guard<std::mutex> lock(m_mutex);
 
-            // Guard against redundant stop calls from control point
-            // Control points often send multiple rapid Stop commands
+            // Guard against redundant stop calls
             if (m_direttaSync && !m_direttaSync->isOpen() && !m_direttaSync->isPlaying()) {
                 DEBUG_LOG("[DirettaRenderer] Stop ignored - already stopped");
                 return;
@@ -602,92 +578,63 @@ bool DirettaRenderer::start(std::atomic<bool>* stopSignal) {
             waitForCallbackComplete();
 
             if (!m_currentURI.empty()) {
-                m_audioEngine->setCurrentURI(m_currentURI, m_currentMetadata, true);
+                m_audioEngine->setCurrentURI(m_currentURI, "", true);
             }
 
-            // v2.0.5 FIX: Use stopPlayback() instead of close() on Stop
-            // Keeps DirettaSync SDK connection open for "quick resume" path.
-            // Prevents intermittent white noise on hi-res track transitions
-            // caused by target (Holo Red) failing to resync after SDK reopen.
             if (m_direttaSync && m_direttaSync->isOpen()) {
                 m_direttaSync->stopPlayback(false);
             }
 
-            m_upnp->notifyStateChange("STOPPED");
+            if (m_ipc) m_ipc->notifyStateChange("stopped");
 
             // Start idle release timer
             m_idleTimerActive.store(true, std::memory_order_release);
         };
 
-        callbacks.onSeek = [this](const std::string& target) {
+        ipcCallbacks.onSeek = [this](double seconds) {
             std::lock_guard<std::mutex> lock(m_mutex);
-            std::cout << "[DirettaRenderer] Seek: " << target << std::endl;
+            std::cout << "[DirettaRenderer] Seek: " << seconds << "s" << std::endl;
 
-            double seconds = parseTimeString(target);
             if (m_audioEngine) {
                 m_audioEngine->seek(seconds);
             }
         };
 
-        m_upnp->setCallbacks(callbacks);
+        ipcCallbacks.onShutdown = [this]() {
+            std::cout << "[DirettaRenderer] Shutdown requested via IPC" << std::endl;
+            // Trigger main loop exit by setting running to false
+            m_running = false;
+        };
 
-        // Start UPnP server (retry until network is ready or cancelled)
-        {
-            bool upnpStarted = false;
-            auto lastLogTime = std::chrono::steady_clock::now();
-            bool firstAttempt = true;
-
-            while (!upnpStarted) {
-                if (m_upnp->start()) {
-                    upnpStarted = true;
-                    break;
-                }
-
-                // No stop signal = no retry (legacy behavior)
-                if (!stopSignal) {
-                    std::cerr << "[DirettaRenderer] Failed to start UPnP server" << std::endl;
-                    return false;
-                }
-
-                // Check if shutdown requested
-                if (!stopSignal->load(std::memory_order_acquire)) {
-                    std::cerr << "[DirettaRenderer] UPnP startup cancelled" << std::endl;
-                    return false;
-                }
-
-                // Log every 5 seconds
-                auto now = std::chrono::steady_clock::now();
-                auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                    now - lastLogTime).count();
-                if (firstAttempt || elapsed >= 5000) {
-                    std::cout << "[DirettaRenderer] Network not ready, retrying UPnP init..." << std::endl;
-                    lastLogTime = now;
-                }
-                firstAttempt = false;
-
-                // Wait 2s before retry, checking stop signal
-                for (int waited = 0; waited < 2000; waited += 100) {
-                    if (stopSignal && !stopSignal->load(std::memory_order_acquire)) {
-                        return false;
-                    }
-                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-                }
+        ipcCallbacks.onDiscoverTargets = []() -> std::vector<IPCServer::TargetInfo> {
+            auto raw = DirettaSync::discoverTargets();
+            std::vector<IPCServer::TargetInfo> result;
+            result.reserve(raw.size());
+            for (const auto& t : raw) {
+                result.push_back({t.index, t.name, t.output, t.portIn, t.portOut,
+                                  t.multiport, t.config, t.version, t.productId});
             }
-        }
+            return result;
+        };
 
-        DEBUG_LOG("[DirettaRenderer] UPnP: " << m_upnp->getDeviceURL());
+        ipcCallbacks.onSelectTarget = [this](int targetIndex) -> bool {
+            return selectTarget(targetIndex);
+        };
+
+        m_ipc->setCallbacks(ipcCallbacks);
+
+        // Start IPC server
+        if (!m_ipc->start(m_config.socketPath, [this]() { return buildStatusSnapshot(); })) {
+            std::cerr << "[DirettaRenderer] Failed to start IPC server on " << m_config.socketPath << std::endl;
+            return false;
+        }
 
         // Start threads
         m_running = true;
-        m_upnpThread = std::thread(&DirettaRenderer::upnpThreadFunc, this);
         m_audioThread = std::thread(&DirettaRenderer::audioThreadFunc, this);
-        if (!g_minimalUPnP) {
-            m_positionThread = std::thread(&DirettaRenderer::positionThreadFunc, this);
-        } else {
-            DEBUG_LOG("[DirettaRenderer] Minimal UPnP: position thread disabled");
-        }
+        m_positionThread = std::thread(&DirettaRenderer::positionThreadFunc, this);
 
-        std::cout << "[DirettaRenderer] Started" << std::endl;
+        std::cout << "[DirettaRenderer] Started (IPC: " << m_config.socketPath << ")" << std::endl;
         return true;
 
     } catch (const std::exception& e) {
@@ -695,6 +642,46 @@ bool DirettaRenderer::start(std::atomic<bool>* stopSignal) {
         stop();
         return false;
     }
+}
+
+//=============================================================================
+// Target Selection
+//=============================================================================
+
+bool DirettaRenderer::selectTarget(int targetIndex, std::atomic<bool>* stopSignal) {
+    std::cout << "[DirettaRenderer] Selecting target #" << (targetIndex + 1) << "..." << std::endl;
+
+    // Disable existing connection if any
+    if (m_direttaSync) {
+        m_direttaSync->disable();
+    }
+
+    m_direttaSync->setTargetIndex(targetIndex);
+
+    if (!m_direttaSync->enable(*m_syncConfig, stopSignal)) {
+        std::cerr << "[DirettaRenderer] Failed to enable target #" << (targetIndex + 1) << std::endl;
+        return false;
+    }
+
+    std::cout << "[DirettaRenderer] Target #" << (targetIndex + 1) << " connected" << std::endl;
+
+    // Pre-connect warmup to eliminate first-play glitch
+    {
+        AudioFormat warmupFmt;
+        warmupFmt.sampleRate = 44100;
+        warmupFmt.bitDepth = 24;
+        warmupFmt.channels = 2;
+        warmupFmt.isDSD = false;
+        std::cout << "[DirettaRenderer] Pre-connecting (warmup)..." << std::endl;
+        if (m_direttaSync->open(warmupFmt)) {
+            m_direttaSync->stopPlayback(true);
+            std::cout << "[DirettaRenderer] Warmup done" << std::endl;
+        } else {
+            std::cerr << "[DirettaRenderer] Warmup failed (non-fatal)" << std::endl;
+        }
+    }
+
+    return true;
 }
 
 //=============================================================================
@@ -722,11 +709,10 @@ void DirettaRenderer::stop() {
         m_direttaSync->disable();
     }
 
-    if (m_upnp) {
-        m_upnp->stop();
+    if (m_ipc) {
+        m_ipc->stop();
     }
 
-    if (m_upnpThread.joinable()) m_upnpThread.join();
     if (m_audioThread.joinable()) m_audioThread.join();
     if (m_positionThread.joinable()) m_positionThread.join();
 
@@ -736,16 +722,6 @@ void DirettaRenderer::stop() {
 //=============================================================================
 // Thread Functions
 //=============================================================================
-
-void DirettaRenderer::upnpThreadFunc() {
-    DEBUG_LOG("[UPnP Thread] Started");
-
-    while (m_running) {
-        std::this_thread::sleep_for(std::chrono::seconds(1));
-    }
-
-    DEBUG_LOG("[UPnP Thread] Stopped");
-}
 
 void DirettaRenderer::audioThreadFunc() {
     DEBUG_LOG("[Audio Thread] Started");
@@ -794,9 +770,6 @@ void DirettaRenderer::audioThreadFunc() {
             }
 
             // Buffer-level flow control (MPD-style)
-            // Only throttle if DirettaSync is actively playing
-            // If not playing (after stop), bufferLevel stays 0 so we call process()
-            // which triggers the open/quick-resume path in the audio callback
             float bufferLevel = 0.0f;
             if (m_direttaSync && m_direttaSync->isPlaying()) {
                 bufferLevel = m_direttaSync->getBufferLevel();
@@ -847,7 +820,7 @@ void DirettaRenderer::positionThreadFunc() {
     DEBUG_LOG("[Position Thread] Started");
 
     while (m_running) {
-        if (!m_audioEngine || !m_upnp) {
+        if (!m_audioEngine || !m_ipc) {
             std::this_thread::sleep_for(std::chrono::seconds(1));
             continue;
         }
@@ -855,34 +828,19 @@ void DirettaRenderer::positionThreadFunc() {
         auto state = m_audioEngine->getState();
 
         if (state == AudioEngine::State::PLAYING) {
-            // Read epoch BEFORE reading audio engine state
-            uint32_t epochBefore = m_upnp->getTrackEpoch();
-
             double positionSeconds = m_audioEngine->getPosition();
-            int position = static_cast<int>(positionSeconds);
-
             const auto& trackInfo = m_audioEngine->getCurrentTrackInfo();
-            int duration = 0;
+            double duration = 0.0;
             if (trackInfo.sampleRate > 0) {
-                duration = trackInfo.duration / trackInfo.sampleRate;
+                duration = static_cast<double>(trackInfo.duration) / trackInfo.sampleRate;
             }
 
-            // Cap reported position to (duration - 1) while PLAYING.
-            // Prevents control points from seeing RelTime >= TrackDuration
-            // due to decoded samples running ahead of DAC output by ~300ms.
-            if (duration > 0 && position >= duration) {
-                position = duration - 1;
+            // Cap reported position to (duration - 1) while PLAYING
+            if (duration > 0.0 && positionSeconds >= duration) {
+                positionSeconds = duration - 1.0;
             }
 
-            // Check epoch AFTER reading - if it changed, a gapless transition
-            // happened while we were reading and our values are stale
-            if (m_upnp->getTrackEpoch() == epochBefore) {
-                m_upnp->setCurrentPosition(position);
-                m_upnp->setTrackDuration(duration);
-                m_upnp->notifyPositionChange(position, duration);
-            } else {
-                DEBUG_LOG("[Position Thread] Skipping stale update (track changed)");
-            }
+            m_ipc->notifyPosition(positionSeconds, duration);
         }
 
         std::this_thread::sleep_for(std::chrono::seconds(1));

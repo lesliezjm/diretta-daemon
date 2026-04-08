@@ -29,6 +29,7 @@
 #include <chrono>
 #include <cstring>
 #include <sstream>
+#include <vector>
 #include <condition_variable>
 
 //=============================================================================
@@ -105,7 +106,6 @@ extern LogRing* g_logRing;
 #include "LogLevel.h"
 
 extern bool g_verbose;
-extern bool g_minimalUPnP;
 extern int g_rtPriority;
 
 #ifdef NOLOG
@@ -481,6 +481,20 @@ public:
     void setMTU(uint32_t mtu) { m_mtuOverride = mtu; }
     bool verifyTargetAvailable();
     static void listTargets();
+
+    struct TargetInfo {
+        int index;
+        std::string name;
+        std::string output;
+        uint16_t portIn;
+        uint16_t portOut;
+        bool multiport;
+        std::string config;
+        uint16_t version;
+        uint64_t productId;
+    };
+
+    static std::vector<TargetInfo> discoverTargets();
 
 protected:
     //=========================================================================
