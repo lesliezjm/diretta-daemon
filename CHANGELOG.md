@@ -1,5 +1,66 @@
 # Changelog
 
+## [3.0.0] - 2026-04-08
+
+### 🚀 Major Refactor: Strip UPnP, Add Unix Socket IPC
+
+This version removes the UPnP/DLNA layer entirely and replaces it with a clean Unix domain socket IPC interface for integration with external music players (Go, etc.).
+
+### ✨ New Features
+
+**Unix Socket IPC Interface:**
+- New `IPCServer` class: epoll-based Unix domain socket server with line-delimited JSON protocol
+- Multiple connections supported: status connections (read-only) + single control connection
+- Push notifications broadcast to all clients: `state_change`, `track_change`, `position`
+- Available commands: `discover_targets`, `select_target`, `play`, `pause`, `stop`, `seek`, `status`, `acquire_control`, `release_control`, `shutdown`
+
+**Runtime Target Selection:**
+- Daemon no longer binds to a target at startup
+- `discover_targets` command scans the network and returns JSON target list
+- `select_target` command connects to any discovered target at runtime
+- Supports switching targets while daemon is running
+- Warmup pre-connect eliminates first-play glitch regardless of startup order
+
+**IPC Protocol:**
+- `discover_targets`: Returns target name, output type (I2S/USB), port numbers, SDK version, product ID
+- `select_target`: Disconnects current target, connects new one with warmup
+- `status`: Returns transport state, path, position, duration, sample rate, bit depth, channels, format, DSD rate, buffer level
+- All commands available without acquiring control; playback commands require `acquire_control`
+
+### 🔧 Removed
+
+- **UPnP/DLNA layer**: `UPnPDevice.cpp/hpp`, `ProtocolInfoBuilder.h` deleted
+- **libupnp/libixml**: Removed from linking — zero UPnP dependency
+- **UPnP CLI flags**: `--port`, `--name`, `--uuid`, `--no-gapless`, `--minimal-upnp` removed
+- **Systemd `PORT` and `NAME` config**: No longer used
+
+### 🏗️ Architecture
+
+**Preserved exactly (no changes):**
+- `DirettaSync.cpp/h` — SDK wrapper, ring buffer, format negotiation
+- `DirettaRingBuffer.h` — lock-free SPSC, AVX2/NEON SIMD conversions
+- `AudioEngine.cpp/h` — FFmpeg decode, format detection
+- All SIMD optimization code
+- Lock-free audio hot path
+
+**New files:**
+- `src/IPCServer.cpp/h` — Unix socket IPC server
+- `src/glibc_compat.c` — glibc 2.38 ABI shim for SDK compatibility
+
+**Systemd updated:**
+- Binary renamed: `DirettaRendererUPnP` → `DirettaRenderer`
+- Installation path: `/opt/diretta-renderer-upnp` → `/opt/diretta-renderer`
+- Config: `TARGET=0` (IPC selection), `SOCKET_PATH` added, UPnP fields removed
+
+### 📚 Documentation
+
+- `docs/ARCHITECTURE.md` — System architecture and threading model
+- `docs/IPC_PROTOCOL.md` — Complete JSON command reference
+- `docs/GO_INTEGRATION.md` — Go client integration guide with example code
+- `README.md`, `CONFIGURATION.md`, `INSTALLATION.md`, `TROUBLESHOOTING.md` updated for IPC version
+
+---
+
 ## [2.1.10] - 2026-04-06
 
 ### Changed
