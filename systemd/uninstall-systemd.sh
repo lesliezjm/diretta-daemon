@@ -1,13 +1,13 @@
 #!/bin/bash
-# Diretta UPnP Renderer - Systemd Uninstall Script
+# Diretta Host Daemon - Systemd Uninstall Script
 
 set -e
 
-INSTALL_DIR="/opt/diretta-renderer-upnp"
+INSTALL_DIR="/opt/diretta-renderer"
 SERVICE_FILE="/etc/systemd/system/diretta-renderer.service"
 
 echo "════════════════════════════════════════════════════════"
-echo "  Diretta UPnP Renderer - Systemd Service Uninstall"
+echo "  Diretta Host Daemon - Systemd Service Uninstall"
 echo "════════════════════════════════════════════════════════"
 echo ""
 
@@ -72,6 +72,6 @@ echo "════════════════════════�
 echo "  ✓ Uninstallation Complete!"
 echo "════════════════════════════════════════════════════════"
 echo ""
-echo "The renderer has been completely removed from systemd."
+echo "The daemon has been completely removed from systemd."
 echo "Your project files remain in the source directory."
 echo ""

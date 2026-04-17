@@ -4,8 +4,7 @@
 
 set -e
 
-# Default values (can be overridden by config file)
-TARGET="${TARGET:-1}"
+# Values sourced from /etc/default/diretta-renderer via EnvironmentFile in the systemd unit.
 SOCKET_PATH="${SOCKET_PATH:-/tmp/diretta-renderer.sock}"
 VERBOSE="${VERBOSE:-}"
 INTERFACE="${INTERFACE:-${NETWORK_INTERFACE:-}}"
@@ -27,9 +26,6 @@ RENDERER_BIN="/opt/diretta-renderer/DirettaRenderer"
 
 # Build command as array (preserves arguments with spaces)
 CMD=("$RENDERER_BIN")
-
-# Basic options
-CMD+=("--target" "$TARGET")
 
 # IPC socket path
 if [ -n "$SOCKET_PATH" ]; then
@@ -83,12 +79,20 @@ fi
 # Build exec prefix as array for process priority
 EXEC_PREFIX=()
 
-# Apply nice level
+# Apply nice level (skip if nice itself is unavailable or fails — e.g. in some container environments)
 if [ -n "$NICE_LEVEL" ] && [ "$NICE_LEVEL" != "0" ]; then
-    EXEC_PREFIX=("nice" "-n" "$NICE_LEVEL")
+    # Test with a short-lived external command: if nice fails, the subshell exits but
+    # || true ensures set -e in the parent does not fire, and we skip the priority wrapper.
+    if (nice -n "$NICE_LEVEL" /bin/sleep 0.1 2>/dev/null) 2>/dev/null; then
+        EXEC_PREFIX=("nice" "-n" "$NICE_LEVEL")
+    else
+        echo "   (nice unavailable in this environment, skipping process priority)"
+    fi
 fi
 
-# Apply I/O scheduling
+# Apply I/O scheduling.
+# In some container/VM environments ionice may be denied even with CAP_SYS_NICE.
+# We test it first to avoid killing the entire daemon start when it fails.
 if [ -n "$IO_SCHED_CLASS" ]; then
     case "$IO_SCHED_CLASS" in
         realtime|1)    IONICE_CLASS=1 ;;
@@ -98,10 +102,15 @@ if [ -n "$IO_SCHED_CLASS" ]; then
     esac
 
     if [ -n "$IONICE_CLASS" ]; then
-        if [ "$IONICE_CLASS" = "3" ]; then
-            EXEC_PREFIX=("ionice" "-c" "$IONICE_CLASS" "${EXEC_PREFIX[@]}")
+        # Test with a short-lived external command: if ionice fails, skip gracefully.
+        if (ionice -c "$IONICE_CLASS" -n "${IO_SCHED_PRIORITY:-0}" /bin/sleep 0.1) 2>/dev/null; then
+            if [ "$IONICE_CLASS" = "3" ]; then
+                EXEC_PREFIX=("ionice" "-c" "$IONICE_CLASS" "${EXEC_PREFIX[@]}")
+            else
+                EXEC_PREFIX=("ionice" "-c" "$IONICE_CLASS" "-n" "${IO_SCHED_PRIORITY:-0}" "${EXEC_PREFIX[@]}")
+            fi
         else
-            EXEC_PREFIX=("ionice" "-c" "$IONICE_CLASS" "-n" "${IO_SCHED_PRIORITY:-0}" "${EXEC_PREFIX[@]}")
+            echo "   (ionice unavailable in this environment, skipping I/O scheduling)"
         fi
     fi
 fi
@@ -112,7 +121,6 @@ echo "  Starting Diretta Host Daemon"
 echo "════════════════════════════════════════════════════════"
 echo ""
 echo "Configuration:"
-echo "  Target:            $TARGET"
 echo "  Socket:            $SOCKET_PATH"
 echo "  Network Interface: ${INTERFACE:-auto-detect}"
 echo "  Nice level:        $NICE_LEVEL"

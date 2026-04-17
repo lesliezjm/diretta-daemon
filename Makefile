@@ -1,4 +1,4 @@
-# Diretta UPnP Renderer - Makefile (Simplified Architecture)
+# Diretta Host Daemon - Makefile
 # Uses unified DirettaSync class (merged from DirettaSyncAdapter + DirettaOutput)
 # Based on MPD Diretta Output Plugin v0.4.0
 #
