@@ -47,7 +47,9 @@ Diretta Target (DAC)
 
 **Socket:** `/tmp/diretta-renderer.sock` (configurable)
 
-Commands: `discover_targets`, `status`, `acquire_control`, `release_control`, `play`, `pause`, `stop`, `seek`, `select_target`, `shutdown`
+Commands: `discover_targets`, `status`, `acquire_control`, `release_control`,
+`set_uri`, `queue_next`, `play`, `play_now`, `pause`, `stop`, `seek`,
+`select_target`, `shutdown`
 
 Full protocol: [docs/IPC_PROTOCOL.md](IPC_PROTOCOL.md)
 
@@ -92,8 +94,29 @@ DirettaSync::getNewStream() [SDK thread]
 ```bash
 make clean && make
 sudo ./bin/DirettaRenderer                    # no target, use IPC
-sudo ./bin/DirettaRenderer --target 1         # auto-connect at startup
 sudo ./bin/DirettaRenderer --verbose          # debug logs
+```
+
+Manual playback flow:
+
+```bash
+(printf '%s\n' '{"cmd":"discover_targets"}'; sleep 2) \
+| sudo socat -T 5 - UNIX-CONNECT:/tmp/diretta-renderer.sock
+
+(printf '%s\n%s\n' \
+  '{"cmd":"acquire_control"}' \
+  '{"cmd":"select_target","target":"1"}'; sleep 3) \
+| sudo socat -T 12 - UNIX-CONNECT:/tmp/diretta-renderer.sock
+
+(printf '%s\n%s\n' \
+  '{"cmd":"acquire_control"}' \
+  '{"cmd":"set_uri","path":"/path/to/test.wav"}'; sleep 2) \
+| sudo socat -T 8 - UNIX-CONNECT:/tmp/diretta-renderer.sock
+
+(printf '%s\n%s\n' \
+  '{"cmd":"acquire_control"}' \
+  '{"cmd":"play"}'; sleep 5) \
+| sudo socat -T 10 - UNIX-CONNECT:/tmp/diretta-renderer.sock
 ```
 
 ## SDK Reference

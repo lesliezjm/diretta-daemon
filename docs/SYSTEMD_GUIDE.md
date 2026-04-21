@@ -1,8 +1,8 @@
-# Systemd Service Guide - Diretta UPnP Renderer
+# Systemd Service Guide - Diretta Host Daemon
 
 ## 📖 Overview
 
-This guide explains how to run the Diretta UPnP Renderer as a systemd service, allowing automatic startup on boot and easy management.
+This guide explains how to run the Diretta Host Daemon as a systemd service, allowing automatic startup on boot and easy management.
 
 **Credits:** Service configuration based on recommendations from **olm52** (AudioLinux developer).
 
@@ -30,11 +30,39 @@ sudo systemctl status diretta-renderer
 
 ---
 
+## IPC Playback Test
+
+With the service running and `TARGET=0`, choose the target at runtime through
+IPC. Manual `socat` tests should keep the socket open briefly after each
+request so discovery and playback responses can return.
+
+```bash
+(printf '%s\n' '{"cmd":"discover_targets"}'; sleep 2) \
+| sudo socat -T 5 - UNIX-CONNECT:/tmp/diretta-renderer.sock
+
+(printf '%s\n%s\n' \
+  '{"cmd":"acquire_control"}' \
+  '{"cmd":"select_target","target":"1"}'; sleep 3) \
+| sudo socat -T 12 - UNIX-CONNECT:/tmp/diretta-renderer.sock
+
+(printf '%s\n%s\n' \
+  '{"cmd":"acquire_control"}' \
+  '{"cmd":"set_uri","path":"/path/to/test.wav"}'; sleep 2) \
+| sudo socat -T 8 - UNIX-CONNECT:/tmp/diretta-renderer.sock
+
+(printf '%s\n%s\n' \
+  '{"cmd":"acquire_control"}' \
+  '{"cmd":"play"}'; sleep 5) \
+| sudo socat -T 10 - UNIX-CONNECT:/tmp/diretta-renderer.sock
+```
+
+---
+
 ## 📁 Installed Files
 
 | File | Location | Purpose |
 |------|----------|---------|
-| **Binary** | `/opt/diretta-renderer-upnp/DirettaRendererUPnP` | The renderer executable |
+| **Binary** | `/opt/diretta-renderer/DirettaRenderer` | The renderer executable |
 | **Config** | `/etc/default/diretta-renderer` | Service configuration |
 | **Service** | `/etc/systemd/system/diretta-renderer.service` | Systemd unit file |
 
@@ -51,15 +79,12 @@ sudo nano /etc/default/diretta-renderer
 ### Available Options
 
 ```bash
-# Target Diretta device (1 = first found)
-TARGET=1
+# Target Diretta device
+# 0 = no startup target; use IPC select_target at runtime
+TARGET=0
 
-# UPnP port (default: 4005)
-PORT=4005
-
-# Gapless playback
-# Add "--no-gapless" to disable, leave empty to enable
-GAPLESS=""
+# IPC socket path
+SOCKET_PATH="/tmp/diretta-renderer.sock"
 
 # Log verbosity
 # Options: "" (normal), "--verbose" (debug), "--quiet" (warnings only)
@@ -68,6 +93,11 @@ VERBOSE=""
 # Network interface for multi-homed systems (default: auto-detect)
 # Use interface name ("eth0") or IP address ("192.168.1.10")
 NETWORK_INTERFACE=""
+
+# CPU affinity
+# Empty = disabled. Use different physical cores when possible.
+CPU_AUDIO=""
+CPU_OTHER=""
 ```
 
 ### Apply Changes
@@ -165,16 +195,16 @@ systemctl cat diretta-renderer
 
 ```ini
 [Unit]
-Description=Diretta UPnP Renderer
+Description=Diretta Host Daemon
 After=network-online.target        # Wait for network
 Wants=network-online.target
 
 [Service]
 Type=simple
 User=root                          # Start as root for network init
-WorkingDirectory=/opt/diretta-renderer-upnp
+WorkingDirectory=/opt/diretta-renderer
 EnvironmentFile=-/etc/default/diretta-renderer
-ExecStart=/opt/diretta-renderer-upnp/start-renderer.sh
+ExecStart=/opt/diretta-renderer/start-renderer.sh
 
 Restart=on-failure
 RestartSec=5
@@ -190,9 +220,9 @@ CapabilityBoundingSet=CAP_NET_RAW CAP_NET_ADMIN CAP_SYS_NICE
 # Filesystem: read-only except private /tmp
 ProtectSystem=strict
 ProtectHome=true
-PrivateTmp=true
-ReadOnlyPaths=/opt/diretta-renderer-upnp
-ReadWritePaths=/var/log
+PrivateTmp=false
+ReadOnlyPaths=/opt/diretta-renderer
+ReadWritePaths=/var/log /tmp
 
 # Kernel/device isolation (no /dev access, no kernel tuning)
 PrivateDevices=true
@@ -228,12 +258,13 @@ The service runs as root to ensure full access to raw sockets (Diretta protocol)
 
 ## 🎯 Common Tasks
 
-### Change Port
+### Change IPC Socket Or Startup Target
 
 ```bash
 # Edit config
 sudo nano /etc/default/diretta-renderer
-# Change: PORT=4006
+# Change: SOCKET_PATH=/tmp/diretta-renderer.sock
+# Change: TARGET=1
 
 # Restart service
 sudo systemctl restart diretta-renderer
@@ -246,7 +277,7 @@ sudo systemctl restart diretta-renderer
 sudo systemctl stop diretta-renderer
 
 # Copy new binary
-sudo cp ./bin/DirettaRendererUPnP /opt/diretta-renderer-upnp/
+sudo cp ./bin/DirettaRenderer /opt/diretta-renderer/
 
 # Start service
 sudo systemctl start diretta-renderer
@@ -266,7 +297,7 @@ systemctl status diretta-renderer -l
 sudo journalctl -u diretta-renderer -n 50
 
 # Check if binary exists
-ls -l /opt/diretta-renderer-upnp/DirettaRendererUPnP
+ls -l /opt/diretta-renderer/DirettaRenderer
 
 # Check permissions
 ls -l /etc/systemd/system/diretta-renderer.service
@@ -316,7 +347,7 @@ sudo rm /etc/systemd/system/diretta-renderer.service
 sudo systemctl daemon-reload
 
 # Remove installation directory (optional)
-sudo rm -rf /opt/diretta-renderer-upnp
+sudo rm -rf /opt/diretta-renderer
 ```
 
 ---
@@ -336,13 +367,13 @@ sudo cp /etc/systemd/system/diretta-renderer.service \
 sudo cp /etc/default/diretta-renderer \
         /etc/default/diretta-renderer-2
 
-# Edit second config with different port
+# Edit second config with different socket and target
 sudo nano /etc/default/diretta-renderer-2
-# Set: PORT=4006, TARGET=2
+# Set: SOCKET_PATH=/tmp/diretta-renderer-2.sock, TARGET=2
 
 # Edit second service to use second config
 sudo nano /etc/systemd/system/diretta-renderer-2.service
-# Change: EnvironmentFile=-/opt/diretta-renderer-upnp/diretta-renderer-2.conf
+# Change: EnvironmentFile=-/etc/default/diretta-renderer-2
 
 # Enable and start
 sudo systemctl daemon-reload
@@ -365,11 +396,15 @@ IO_SCHED_PRIORITY=0
 
 These settings can also be adjusted through the web UI under "Process Priority".
 
-For CPU affinity (pinning to specific cores), add to the service file:
+CPU affinity is configured in `/etc/default/diretta-renderer`:
 
-```ini
-[Service]
-CPUAffinity=0 1
+```bash
+# Pin Diretta SDK occupied worker thread.
+# This automatically enables SDK thread mode flag 16 (OccupiedCPU).
+CPU_AUDIO=2
+
+# Pin main, IPC, decode, logging, and position threads.
+CPU_OTHER=1
 ```
 
 **Warning:** Extreme priority settings may affect system stability. Test thoroughly!

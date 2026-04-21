@@ -42,6 +42,10 @@ public:
         int mtu = -1;             // MTU override in bytes (default: auto-detect)
         int targetProfileLimitTime = -1;  // 0=SelfProfile (stable, default), >0=TargetProfile limit in µs (experimental)
 
+        // CPU affinity (-1 = no pinning, default)
+        int cpuAudio = -1;        // Core for DirettaSync worker thread
+        int cpuOther = -1;        // Core for decode/IPC/position/logging threads
+
         Config();
     };
 
@@ -70,6 +74,14 @@ private:
     // Select and connect to a Diretta target (disables previous if any)
     bool selectTarget(int targetIndex, std::atomic<bool>* stopSignal = nullptr);
 
+    // Playback helpers. Call with m_mutex held.
+    bool playPathLocked(const std::string& path, const std::string& metadata);
+    bool setUriLocked(const std::string& path, const std::string& metadata, bool stopIfActive);
+    bool queueNextLocked(const std::string& path, const std::string& metadata);
+    bool playCurrentLocked();
+    bool replaceAndPlayLocked(const std::string& path, const std::string& metadata);
+    void stopForUriChangeLocked();
+
     // Configuration
     Config m_config;
     std::unique_ptr<struct DirettaConfig> m_syncConfig;
@@ -89,6 +101,7 @@ private:
 
     // Current track info
     std::string m_currentURI;
+    std::string m_currentMetadata;
 
     // Callback synchronization (lock-free for hot path)
     std::atomic<bool> m_callbackRunning{false};

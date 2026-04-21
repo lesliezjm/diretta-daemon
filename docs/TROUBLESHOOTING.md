@@ -40,13 +40,17 @@ Or disconnect.
 ### No targets found
 
 ```bash
-echo '{"cmd":"discover_targets"}' | socat - UNIX-CONNECT:/tmp/diretta-renderer.sock
+(printf '%s\n' '{"cmd":"discover_targets"}'; sleep 2) \
+| sudo socat -T 5 - UNIX-CONNECT:/tmp/diretta-renderer.sock
 ```
 
 Solutions:
 - Ensure Diretta Target is running on the same network
 - Specify network interface: `sudo ./bin/DirettaRenderer --interface eth0`
 - Check firewall allows UDP 50001/50002
+- If `socat` prints no JSON at all, make sure the command keeps the connection
+  open with `sleep`; plain `printf ... | socat` can close before discovery
+  returns.
 
 ### Target goes offline
 
@@ -56,9 +60,14 @@ Solutions:
 → `{"ok":false,"error":"Failed to enable target #1"}`
 
 Re-discover and select another:
-```json
-{"cmd":"discover_targets"}
-{"cmd":"select_target","target":"2"}
+```bash
+(printf '%s\n' '{"cmd":"discover_targets"}'; sleep 2) \
+| sudo socat -T 5 - UNIX-CONNECT:/tmp/diretta-renderer.sock
+
+(printf '%s\n%s\n' \
+  '{"cmd":"acquire_control"}' \
+  '{"cmd":"select_target","target":"2"}'; sleep 3) \
+| sudo socat -T 12 - UNIX-CONNECT:/tmp/diretta-renderer.sock
 ```
 
 ## Playback Issues

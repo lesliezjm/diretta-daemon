@@ -2112,13 +2112,28 @@ bool AudioEngine::openCurrentTrack() {
     // Create decoder
     m_currentDecoder = std::make_unique<AudioDecoder>();
 
-    if (!m_currentDecoder->open(m_currentURI)) {
+    bool opened = false;
+    try {
+        opened = m_currentDecoder->open(m_currentURI);
+    } catch (const std::exception& e) {
+        std::cerr << "[AudioEngine] Exception while opening track: " << e.what() << std::endl;
+        m_currentDecoder.reset();
+        return false;
+    } catch (...) {
+        std::cerr << "[AudioEngine] Unknown exception while opening track" << std::endl;
+        m_currentDecoder.reset();
+        return false;
+    }
+
+    if (!opened) {
         std::cerr << "[AudioEngine] Failed to open track" << std::endl;
         m_currentDecoder.reset();
         return false;
     }
 
     m_currentTrackInfo = m_currentDecoder->getTrackInfo();
+    m_currentTrackInfo.uri = m_currentURI;
+    m_currentTrackInfo.metadata = m_currentMetadata;
 
     std::cout << "[AudioEngine] Track opened: ";
     if (m_currentTrackInfo.isDSD) {
@@ -2265,6 +2280,8 @@ void AudioEngine::transitionToNextTrack() {
 
     if (m_currentDecoder) {
         m_currentTrackInfo = m_currentDecoder->getTrackInfo();
+        m_currentTrackInfo.uri = m_currentURI;
+        m_currentTrackInfo.metadata = m_currentMetadata;
         if (m_trackChangeCallback) {
             m_trackChangeCallback(m_trackNumber, m_currentTrackInfo, m_currentURI, m_currentMetadata);
         }

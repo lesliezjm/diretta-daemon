@@ -1,4 +1,4 @@
-# Diretta Host Daemon v3.0.0
+# Diretta Host Daemon v3.0.2
 
 > **Based on [DirettaRendererUPnP](https://github.com/cometdom/DirettaRendererUPnP) by Dominique COMET (cometdom)** — v3.0 removes the UPnP/DLNA layer and replaces it with a Unix socket IPC interface for integration with external music players.
 
@@ -59,21 +59,31 @@ make clean && make
 ```bash
 # Start daemon (no target — use IPC to select at runtime)
 sudo ./bin/DirettaRenderer
-
-# Or connect to a specific target at startup (backward compat)
-sudo ./bin/DirettaRenderer --target 1
 ```
 
 ### Test IPC
 
 ```bash
 # Discover targets
-echo '{"cmd":"discover_targets"}' | socat - UNIX-CONNECT:/tmp/diretta-renderer.sock
+(printf '%s\n' '{"cmd":"discover_targets"}'; sleep 2) \
+| sudo socat -T 5 - UNIX-CONNECT:/tmp/diretta-renderer.sock
 
-# Get control, select target, query status
-echo '{"cmd":"acquire_control"}' | socat - UNIX-CONNECT:/tmp/diretta-renderer.sock
-echo '{"cmd":"select_target","target":"1"}' | socat - UNIX-CONNECT:/tmp/diretta-renderer.sock
-echo '{"cmd":"status"}' | socat - UNIX-CONNECT:/tmp/diretta-renderer.sock
+# Select target #1
+(printf '%s\n%s\n' \
+  '{"cmd":"acquire_control"}' \
+  '{"cmd":"select_target","target":"1"}'; sleep 3) \
+| sudo socat -T 12 - UNIX-CONNECT:/tmp/diretta-renderer.sock
+
+# Set URI, then play
+(printf '%s\n%s\n' \
+  '{"cmd":"acquire_control"}' \
+  '{"cmd":"set_uri","path":"/path/to/test.wav"}'; sleep 2) \
+| sudo socat -T 8 - UNIX-CONNECT:/tmp/diretta-renderer.sock
+
+(printf '%s\n%s\n' \
+  '{"cmd":"acquire_control"}' \
+  '{"cmd":"play"}'; sleep 5) \
+| sudo socat -T 10 - UNIX-CONNECT:/tmp/diretta-renderer.sock
 ```
 
 ## Build Variants
@@ -100,5 +110,7 @@ make NOLOG=1                     # Production build (no SDK logging)
 
 ## Version History
 
+- **v3.0.2** — Fix IPC playback lifecycle, add explicit `set_uri`/`queue_next`/`play_now`, restore CPU affinity configuration, and update socket playback integration docs.
+- **v3.0.1** — Fix systemd install/uninstall scripts and service reliability.
 - **v3.0.0** — Stripped UPnP/DLNA layer. Unix socket IPC interface. Runtime target selection via `select_target` command.
 - **v2.1.x** — UPnP renderer with low-latency optimizations, AVX2 SIMD, lock-free ring buffer

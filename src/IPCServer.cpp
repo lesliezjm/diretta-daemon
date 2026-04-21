@@ -29,6 +29,9 @@ static constexpr int READ_BUF_SIZE = 4096;
 static constexpr char CMD_ACQUIRE_CONTROL[] = "acquire_control";
 static constexpr char CMD_RELEASE_CONTROL[] = "release_control";
 static constexpr char CMD_PLAY[] = "play";
+static constexpr char CMD_SET_URI[] = "set_uri";
+static constexpr char CMD_QUEUE_NEXT[] = "queue_next";
+static constexpr char CMD_PLAY_NOW[] = "play_now";
 static constexpr char CMD_PAUSE[] = "pause";
 static constexpr char CMD_STOP[] = "stop";
 static constexpr char CMD_SEEK[] = "seek";
@@ -369,10 +372,14 @@ void IPCServer::processLine(int fd, const std::string& line) {
     // Dispatch control commands
     if (cmd == CMD_PLAY) {
         std::string path = jsonGetString(line, "path");
+        std::string metadata = jsonGetString(line, "metadata");
         if (!path.empty()) {
             if (m_callbacks.onPlay) {
-                sendJson(fd, buildOk());
-                m_callbacks.onPlay(path);
+                if (m_callbacks.onPlay(path, metadata)) {
+                    sendJson(fd, buildOk());
+                } else {
+                    sendJson(fd, buildError("play failed"));
+                }
             } else {
                 sendJson(fd, buildError("play not available"));
             }
@@ -384,6 +391,54 @@ void IPCServer::processLine(int fd, const std::string& line) {
             } else {
                 sendJson(fd, buildError("resume not available"));
             }
+        }
+    } else if (cmd == CMD_SET_URI) {
+        std::string path = jsonGetString(line, "path");
+        std::string metadata = jsonGetString(line, "metadata");
+        if (path.empty()) {
+            sendJson(fd, buildError("missing 'path' field"));
+            return;
+        }
+        if (m_callbacks.onSetUri) {
+            if (m_callbacks.onSetUri(path, metadata)) {
+                sendJson(fd, buildOk());
+            } else {
+                sendJson(fd, buildError("set_uri failed"));
+            }
+        } else {
+            sendJson(fd, buildError("set_uri not available"));
+        }
+    } else if (cmd == CMD_QUEUE_NEXT) {
+        std::string path = jsonGetString(line, "path");
+        std::string metadata = jsonGetString(line, "metadata");
+        if (path.empty()) {
+            sendJson(fd, buildError("missing 'path' field"));
+            return;
+        }
+        if (m_callbacks.onQueueNext) {
+            if (m_callbacks.onQueueNext(path, metadata)) {
+                sendJson(fd, buildOk());
+            } else {
+                sendJson(fd, buildError("queue_next failed"));
+            }
+        } else {
+            sendJson(fd, buildError("queue_next not available"));
+        }
+    } else if (cmd == CMD_PLAY_NOW) {
+        std::string path = jsonGetString(line, "path");
+        std::string metadata = jsonGetString(line, "metadata");
+        if (path.empty()) {
+            sendJson(fd, buildError("missing 'path' field"));
+            return;
+        }
+        if (m_callbacks.onPlayNow) {
+            if (m_callbacks.onPlayNow(path, metadata)) {
+                sendJson(fd, buildOk());
+            } else {
+                sendJson(fd, buildError("play_now failed"));
+            }
+        } else {
+            sendJson(fd, buildError("play_now not available"));
         }
     } else if (cmd == CMD_PAUSE) {
         if (m_callbacks.onPause) {
@@ -428,8 +483,11 @@ void IPCServer::processLine(int fd, const std::string& line) {
             return;
         }
         if (m_callbacks.onSelectTarget) {
-            sendJson(fd, buildOk());
-            m_callbacks.onSelectTarget(targetIndex);
+            if (m_callbacks.onSelectTarget(targetIndex)) {
+                sendJson(fd, buildOk());
+            } else {
+                sendJson(fd, buildError("Failed to enable target #" + std::to_string(targetIndex + 1)));
+            }
         } else {
             sendJson(fd, buildError("select_target not available"));
         }
@@ -453,7 +511,7 @@ void IPCServer::notifyTrackChange(const std::string& path, uint32_t sampleRate, 
     snprintf(fields, sizeof(fields),
         "\"path\":\"%s\",\"sampleRate\":%u,\"bitDepth\":%u,\"channels\":%u,\"format\":\"%s\",\"duration\":%.1f",
         path.c_str(), sampleRate, bitDepth, channels, format.c_str(), duration);
-    broadcast(buildEvent("track_change", fields));
+    broadcastBestEffort(buildEvent("track_change", fields));
 }
 
 void IPCServer::notifyPosition(double position, double duration) {
@@ -489,6 +547,18 @@ void IPCServer::sendJson(int fd, const std::string& json) {
 
 void IPCServer::broadcast(const std::string& json) {
     std::lock_guard<std::mutex> lock(m_mutex);
+
+    if (m_connections.empty()) return;
+
+    std::string msg = json + "\n";
+    for (auto& [fd, conn] : m_connections) {
+        ::send(fd, msg.c_str(), msg.size(), MSG_NOSIGNAL | MSG_DONTWAIT);
+    }
+}
+
+void IPCServer::broadcastBestEffort(const std::string& json) {
+    std::unique_lock<std::mutex> lock(m_mutex, std::try_to_lock);
+    if (!lock.owns_lock()) return;
 
     if (m_connections.empty()) return;
 

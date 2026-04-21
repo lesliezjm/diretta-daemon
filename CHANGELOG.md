@@ -1,5 +1,32 @@
 # Changelog
 
+## [3.0.2] - 2026-04-21
+
+### Fixed
+- Align socket playback lifecycle with the original UPnP flow by splitting current URI setup, next-track queueing, and immediate replacement into explicit IPC commands.
+- Prevent active playback from being stopped and reopened when a client sends the next track during playback; `play(path)` while already playing now queues the path for backward compatibility.
+- Preserve first-play stabilization after target warmup and keep stop/reopen transitions on the explicit replacement path.
+- Populate `status.path` from the active URI after decoder open and gapless track promotion.
+- Avoid blocking audio-adjacent callbacks on best-effort IPC track-change broadcasts.
+
+### Added
+- IPC commands: `set_uri`, `queue_next`, and `play_now`.
+- CPU affinity options: `--cpu-audio`, `--cpu-other`, `CPU_AUDIO`, and `CPU_OTHER`.
+- Documented tested socket playback flow: `discover_targets -> acquire_control -> select_target -> set_uri -> play`.
+
+### Changed
+- Manual `socat` examples now keep the socket open briefly with `sleep`, so discovery and playback responses can return before stdin closes.
+- Install, systemd, Web UI profile, and integration docs now default to runtime target selection instead of startup target binding.
+
+---
+
+## [3.0.1] - 2026-04-21
+
+### Fixed
+- Corrected systemd install/uninstall scripts and improved service reliability.
+
+---
+
 ## [3.0.0] - 2026-04-08
 
 ### 🚀 Major Refactor: Strip UPnP, Add Unix Socket IPC

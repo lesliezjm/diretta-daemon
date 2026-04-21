@@ -26,6 +26,8 @@
 | `--target-profile-limit <us>` | 0=SelfProfile (stable), >0=TargetProfile (experimental) | `0` |
 | `--mtu <bytes>` | MTU override (auto-detect default) | auto |
 | `--rt-priority <1-99>` | SCHED_FIFO real-time priority for audio thread | `50` |
+| `--cpu-audio <core>` | Pin Diretta SDK occupied worker thread to a CPU core | disabled |
+| `--cpu-other <core>` | Pin main, IPC, decode, logging, and position threads to a CPU core | disabled |
 
 ### Thread Mode Bitmask
 
@@ -68,6 +70,11 @@ SOCKET_PATH="/tmp/diretta-renderer.sock"
 # Network interface
 INTERFACE=""
 
+# CPU affinity
+# Empty = disabled. Use different physical cores when possible.
+CPU_AUDIO=""
+CPU_OTHER=""
+
 # Log level
 VERBOSE=""
 
@@ -87,6 +94,9 @@ The following old UPnP variable names are **no longer used** and ignored:
 - `GAPLESS` — was gapless toggle (always enabled)
 - `MINIMAL_UPNP` — was UPnP minimal mode (removed)
 
+`NETWORK_INTERFACE` and `MTU_OVERRIDE` are still accepted as aliases by the
+systemd wrapper for compatibility with older config files.
+
 ## IPC Commands
 
 All IPC commands are documented in [IPC_PROTOCOL.md](IPC_PROTOCOL.md).
@@ -94,4 +104,28 @@ All IPC commands are documented in [IPC_PROTOCOL.md](IPC_PROTOCOL.md).
 Key commands for runtime configuration:
 - `discover_targets` — scan network for targets
 - `select_target` — connect to a specific target at runtime
+- `set_uri` — load the current track without starting playback
+- `play` — start playback of the current URI, or resume from pause
 - `status` — query playback state
+
+Manual playback smoke test:
+
+```bash
+(printf '%s\n' '{"cmd":"discover_targets"}'; sleep 2) \
+| sudo socat -T 5 - UNIX-CONNECT:/tmp/diretta-renderer.sock
+
+(printf '%s\n%s\n' \
+  '{"cmd":"acquire_control"}' \
+  '{"cmd":"select_target","target":"1"}'; sleep 3) \
+| sudo socat -T 12 - UNIX-CONNECT:/tmp/diretta-renderer.sock
+
+(printf '%s\n%s\n' \
+  '{"cmd":"acquire_control"}' \
+  '{"cmd":"set_uri","path":"/path/to/test.wav"}'; sleep 2) \
+| sudo socat -T 8 - UNIX-CONNECT:/tmp/diretta-renderer.sock
+
+(printf '%s\n%s\n' \
+  '{"cmd":"acquire_control"}' \
+  '{"cmd":"play"}'; sleep 5) \
+| sudo socat -T 10 - UNIX-CONNECT:/tmp/diretta-renderer.sock
+```

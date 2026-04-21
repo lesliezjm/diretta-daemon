@@ -1,5 +1,5 @@
 {
-    "product_name": "Diretta UPnP Renderer",
+    "product_name": "Diretta Host Daemon",
     "service_name": "diretta-renderer",
     "config_path": "/etc/default/diretta-renderer",
     "config_type": "shell_vars",
@@ -9,39 +9,19 @@
             "collapsed": false,
             "settings": [
                 {
-                    "key": "NAME",
-                    "type": "text",
-                    "label": "Renderer Name",
-                    "description": "UPnP friendly name visible to control points. Supports spaces (e.g., 'Devialet Target').",
-                    "default": ""
-                },
-                {
                     "key": "TARGET",
                     "type": "number",
                     "label": "Diretta Target",
-                    "description": "Target device index (1 = first detected)",
-                    "default": "1",
-                    "min": 1
+                    "description": "Target device index. 0 = no startup target; use IPC select_target at runtime.",
+                    "default": "0",
+                    "min": 0
                 },
                 {
-                    "key": "PORT",
-                    "type": "number",
-                    "label": "UPnP Port",
-                    "description": "UPnP control port (HTTP server uses port+1)",
-                    "default": "4005",
-                    "min": 1024,
-                    "max": 65535
-                },
-                {
-                    "key": "GAPLESS",
-                    "type": "select",
-                    "label": "Gapless Playback",
-                    "description": "Seamless playback between tracks",
-                    "default": "",
-                    "options": [
-                        {"value": "", "label": "Enabled"},
-                        {"value": "--no-gapless", "label": "Disabled"}
-                    ]
+                    "key": "SOCKET_PATH",
+                    "type": "text",
+                    "label": "IPC Socket Path",
+                    "description": "Unix domain socket path used by the Go player integration.",
+                    "default": "/tmp/diretta-renderer.sock"
                 },
                 {
                     "key": "VERBOSE",
@@ -52,7 +32,7 @@
                     "options": [
                         {"value": "", "label": "Normal"},
                         {"value": "--verbose", "label": "Verbose (debug)"},
-                        {"value": "--quiet", "label": "Quiet (errors only)"}
+                        {"value": "--quiet", "label": "Quiet (warnings only)"}
                     ]
                 },
                 {
@@ -61,17 +41,28 @@
                     "label": "Network Interface",
                     "description": "Interface name (eth0) or IP address. Empty = auto-detect.",
                     "default": ""
+                }
+            ]
+        },
+        {
+            "name": "CPU Affinity",
+            "collapsed": true,
+            "settings": [
+                {
+                    "key": "CPU_AUDIO",
+                    "type": "number",
+                    "label": "Audio Core",
+                    "description": "Pin the Diretta SDK occupied worker thread to this CPU core. Empty = disabled.",
+                    "default": "",
+                    "min": 0
                 },
                 {
-                    "key": "MINIMAL_UPNP",
-                    "type": "select",
-                    "label": "Minimal UPnP Mode",
-                    "description": "Disables position polling and event notifications for improved audio quality (reduced CPU overhead). Recommended for JPlay iOS, LMS/slim2UPnP (fixes position drift), and Roon. Progress bar may become approximate.",
+                    "key": "CPU_OTHER",
+                    "type": "number",
+                    "label": "Other Core",
+                    "description": "Pin main, IPC, decode, logging, and position threads to this CPU core. Empty = disabled.",
                     "default": "",
-                    "options": [
-                        {"value": "", "label": "Standard (full UPnP)"},
-                        {"value": "1", "label": "Minimal (no position/events)"}
-                    ]
+                    "min": 0
                 }
             ]
         },
@@ -177,7 +168,7 @@
                     "key": "TARGET_PROFILE_LIMIT",
                     "type": "number",
                     "label": "Target Profile Limit (us)",
-                    "description": "0 = SelfProfile (host-side only), >0 = TargetProfile with auto-adaptation (default: 200)",
+                    "description": "0 = SelfProfile (host-side only), >0 = TargetProfile with auto-adaptation",
                     "default": "",
                     "min": 0
                 },

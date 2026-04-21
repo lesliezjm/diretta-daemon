@@ -63,6 +63,20 @@ if [ ! -f "$CONFIG_FILE" ]; then
     echo "   Configuration file created: $CONFIG_FILE"
 else
     echo "   Configuration file already exists, keeping current settings"
+    MISSING_CPU_CONFIG=0
+    grep -q "^#\?CPU_AUDIO=" "$CONFIG_FILE" || MISSING_CPU_CONFIG=1
+    grep -q "^#\?CPU_OTHER=" "$CONFIG_FILE" || MISSING_CPU_CONFIG=1
+
+    if [ "$MISSING_CPU_CONFIG" -eq 1 ]; then
+        {
+            echo ""
+            echo "# CPU affinity (optional)"
+            echo "# Leave empty to disable pinning."
+            grep -q "^#\?CPU_AUDIO=" "$CONFIG_FILE" || echo "#CPU_AUDIO=\"\""
+            grep -q "^#\?CPU_OTHER=" "$CONFIG_FILE" || echo "#CPU_OTHER=\"\""
+        } >> "$CONFIG_FILE"
+        echo "   Added missing CPU affinity settings to existing configuration"
+    fi
 fi
 
 echo "5. Installing systemd service..."
@@ -100,6 +114,6 @@ echo "  4. View logs:"
 echo "     sudo journalctl -u diretta-renderer -f"
 echo ""
 echo "  5. Test IPC:"
-echo "     (echo '{\"cmd\":\"discover_targets\"}'; sleep 2) | sudo socat - UNIX-CONNECT:/tmp/diretta-renderer.sock"
+echo "     (printf '%s\n' '{\"cmd\":\"discover_targets\"}'; sleep 2) | sudo socat -T 5 - UNIX-CONNECT:/tmp/diretta-renderer.sock"
 echo ""
 echo "════════════════════════════════════════════════════════"

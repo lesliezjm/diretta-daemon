@@ -112,11 +112,22 @@ func (c *Client) SelectTarget(index int) error {
     return nil
 }
 
-func (c *Client) Play(path string) error {
+func (c *Client) SetURI(path string) error {
     resp, err := c.Send(map[string]interface{}{
-        "cmd":  "play",
+        "cmd":  "set_uri",
         "path": path,
     })
+    if err != nil {
+        return err
+    }
+    if !resp.Ok {
+        return fmt.Errorf("set_uri failed: %s", resp.Error)
+    }
+    return nil
+}
+
+func (c *Client) Play() error {
+    resp, err := c.Send(map[string]interface{}{"cmd": "play"})
     if err != nil {
         return err
     }
@@ -135,7 +146,7 @@ func (c *Client) Close() error {
 }
 
 // ListenEvents reads push notifications in a goroutine.
-// Call this after acquiring control and before starting playback.
+// Do not issue more Send calls while this simple listener owns the decoder.
 func (c *Client) ListenEvents(handler func(Response)) {
     go func() {
         for {
@@ -159,13 +170,6 @@ func main() {
     }
     defer client.Close()
 
-    // Acquire control
-    if err := client.AcquireControl(); err != nil {
-        fmt.Fprintf(os.Stderr, "%v\n", err)
-        os.Exit(1)
-    }
-    fmt.Println("Control acquired")
-
     // Discover targets
     targets, err := client.DiscoverTargets()
     if err != nil {
@@ -181,6 +185,13 @@ func main() {
         fmt.Printf("  [%d] %s (%s)\n", t.Index, t.Name, t.Output)
     }
 
+    // Acquire control
+    if err := client.AcquireControl(); err != nil {
+        fmt.Fprintf(os.Stderr, "%v\n", err)
+        os.Exit(1)
+    }
+    fmt.Println("Control acquired")
+
     // Select first target
     if err := client.SelectTarget(1); err != nil {
         fmt.Fprintf(os.Stderr, "%v\n", err)
@@ -188,7 +199,17 @@ func main() {
     }
     fmt.Println("Target connected")
 
-    // Start event listener
+    // Set current URI, then play
+    if err := client.SetURI("/nas/music/test.flac"); err != nil {
+        fmt.Fprintf(os.Stderr, "%v\n", err)
+        os.Exit(1)
+    }
+    if err := client.Play(); err != nil {
+        fmt.Fprintf(os.Stderr, "%v\n", err)
+        os.Exit(1)
+    }
+
+    // Start event listener for subsequent push events.
     client.ListenEvents(func(resp Response) {
         switch resp.Event {
         case "state_change":
@@ -200,12 +221,6 @@ func main() {
             fmt.Printf("Position: %.1f / %.1f\n", resp.Position, resp.Duration)
         }
     })
-
-    // Play
-    if err := client.Play("/nas/music/test.flac"); err != nil {
-        fmt.Fprintf(os.Stderr, "%v\n", err)
-        os.Exit(1)
-    }
 
     // Keep running
     select {}
@@ -238,7 +253,7 @@ client.SelectTarget(1) // 1-based
 
 ### 3. Event Loop
 
-Call `ListenEvents()` before starting playback. Events arrive on the same connection as command responses — you must read from the connection in a separate goroutine:
+Events arrive on the same connection as command responses, so production clients should use a single reader goroutine that demultiplexes command responses and events. The minimal example above starts `ListenEvents()` only after the initial command sequence to avoid concurrent reads from the same JSON decoder.
 
 ```go
 client.ListenEvents(func(resp Response) {
@@ -252,7 +267,11 @@ client.ListenEvents(func(resp Response) {
 
 ### 4. Gapless Playback
 
-Send the next `play(path)` command while the current track is still playing. The AudioEngine handles preloading internally. There is no explicit gapless API.
+For first playback, use `set_uri(path)` followed by `play` with no path. This matches the renderer lifecycle used by the current socket integration.
+
+For normal sequential playback, call `queue_next(path)` while the current track is still playing. The daemon still treats `play(path)` during active playback as `queue_next` for backward compatibility, but new clients should use the explicit command.
+
+Use `play_now(path)` only for an immediate user-initiated replacement/skip, because it uses the stop/reopen transition path.
 
 ### 5. Seek
 
@@ -275,15 +294,17 @@ client.Close()
 
 ```
 1. net.Dial("unix", "/tmp/diretta-renderer.sock")
-2. acquire_control
-3. discover_targets → show targets to user
+2. discover_targets → show targets to user
+3. acquire_control
 4. select_target → connects and warms up
-5. ListenEvents() → start goroutine
-6. play(path) → starts playback
+5. set_uri(path) → load current track
+6. ListenEvents() → start goroutine
+7. play → starts playback
    ← state_change: playing
    ← track_change: format info
    ← position: every 1s
-7. pause() / resume() / stop() / seek()
-8. select_target(2) → switch to different target
-9. release_control + close
+8. queue_next(path) for normal next-track preload, or play_now(path) for immediate replacement
+9. pause() / resume() / stop() / seek()
+10. select_target(2) → switch to different target
+11. release_control + close
 ```

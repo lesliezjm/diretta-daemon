@@ -13,8 +13,12 @@
 #include <thread>
 #include <chrono>
 #include <iomanip>
+#include <algorithm>
+#include <pthread.h>
+#include <sched.h>
+#include <unistd.h>
 
-#define RENDERER_VERSION "3.0.0"
+#define RENDERER_VERSION "3.0.2"
 #define RENDERER_BUILD_DATE __DATE__
 #define RENDERER_BUILD_TIME __TIME__
 
@@ -57,7 +61,23 @@ bool g_verbose = false;
 int g_rtPriority = 50;
 LogLevel g_logLevel = LogLevel::INFO;
 
+static bool pinCurrentThread(int core, const char* name) {
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
+    CPU_SET(core, &cpuset);
+    if (pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset) == 0) {
+        std::cout << "[" << name << "] Pinned to CPU core " << core << std::endl;
+        return true;
+    }
+    std::cerr << "[" << name << "] Failed to pin to core " << core << std::endl;
+    return false;
+}
+
+static int g_cpuOther = -1;
+
 void logDrainThreadFunc() {
+    if (g_cpuOther >= 0) pinCurrentThread(g_cpuOther, "Log Drain Thread");
+
     LogEntry entry;
     while (!g_logDrainStop.load(std::memory_order_acquire)) {
         while (g_logRing && g_logRing->pop(entry)) {
@@ -80,8 +100,8 @@ void listTargets() {
     DirettaSync::listTargets();
 
     std::cout << "\nUsage:\n";
-    std::cout << "   Target #1: sudo ./bin/DirettaRenderer --target 1\n";
-    std::cout << "   Target #2: sudo ./bin/DirettaRenderer --target 2\n";
+    std::cout << "   Start daemon: sudo ./bin/DirettaRenderer\n";
+    std::cout << "   Then choose a target with IPC select_target (1-based index)\n";
     std::cout << std::endl;
 }
 
@@ -164,6 +184,24 @@ DirettaRenderer::Config parseArguments(int argc, char* argv[]) {
                 g_rtPriority = std::max(1, std::min(99, g_rtPriority));
             }
         }
+        else if (arg == "--cpu-audio" && i + 1 < argc) {
+            config.cpuAudio = std::atoi(argv[++i]);
+            int numCores = static_cast<int>(sysconf(_SC_NPROCESSORS_ONLN));
+            if (config.cpuAudio < 0 || config.cpuAudio >= numCores) {
+                std::cerr << "Warning: --cpu-audio " << config.cpuAudio
+                          << " is invalid (this system has cores 0-" << (numCores - 1) << ")" << std::endl;
+                config.cpuAudio = -1;
+            }
+        }
+        else if (arg == "--cpu-other" && i + 1 < argc) {
+            config.cpuOther = std::atoi(argv[++i]);
+            int numCores = static_cast<int>(sysconf(_SC_NPROCESSORS_ONLN));
+            if (config.cpuOther < 0 || config.cpuOther >= numCores) {
+                std::cerr << "Warning: --cpu-other " << config.cpuOther
+                          << " is invalid (this system has cores 0-" << (numCores - 1) << ")" << std::endl;
+                config.cpuOther = -1;
+            }
+        }
         else if (arg == "--help" || arg == "-h") {
             std::cout << "Diretta Host Daemon (IPC controlled)\n\n"
                       << "Usage: " << argv[0] << " [options]\n\n"
@@ -186,6 +224,8 @@ DirettaRenderer::Config parseArguments(int argc, char* argv[]) {
                       << "  --target-profile-limit <us> Target profile limit (0=SelfProfile, default: 0)\n"
                       << "  --mtu <bytes>              MTU override (default: auto-detect)\n"
                       << "  --rt-priority <1-99>       SCHED_FIFO real-time priority (default: 50)\n"
+                      << "  --cpu-audio <core>         Pin Diretta worker/SDK occupied thread to core\n"
+                      << "  --cpu-other <core>         Pin decode/IPC/logging threads to core\n"
                       << std::endl;
             exit(0);
         }
@@ -244,6 +284,17 @@ int main(int argc, char* argv[]) {
 
     DirettaRenderer::Config config = parseArguments(argc, argv);
 
+    if (config.cpuAudio >= 0 && config.cpuOther >= 0 && config.cpuAudio == config.cpuOther) {
+        std::cerr << "Warning: --cpu-audio and --cpu-other are set to the same core ("
+                  << config.cpuAudio << "). No thread isolation will occur." << std::endl;
+    }
+
+    if (config.cpuOther >= 0) {
+        pinCurrentThread(config.cpuOther, "Main Thread");
+    }
+
+    g_cpuOther = config.cpuOther;
+
     // Initialize async logging ring buffer (verbose mode only)
     if (g_verbose) {
         g_logRing = new LogRing();
@@ -259,6 +310,12 @@ int main(int argc, char* argv[]) {
     }
     if (!config.networkInterface.empty()) {
         std::cout << "  Network:  " << config.networkInterface << std::endl;
+    }
+    if (config.cpuAudio >= 0) {
+        std::cout << "  CPU audio: core " << config.cpuAudio << std::endl;
+    }
+    if (config.cpuOther >= 0) {
+        std::cout << "  CPU other: core " << config.cpuOther << std::endl;
     }
     std::cout << std::endl;
 
