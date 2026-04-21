@@ -12,9 +12,9 @@
 
 CXX = g++
 CC = gcc
-CXXFLAGS = -std=c++17 -Wall -Wextra -O2 -pthread
+CXXFLAGS = -std=c++17 -Wall -Wextra -O3 -pthread
 CFLAGS = -O3 -Wall
-LDFLAGS = -pthread
+LDFLAGS = -O3 -pthread
 
 # ============================================
 # Architecture Detection (unchanged from original)

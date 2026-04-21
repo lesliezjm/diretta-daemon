@@ -73,9 +73,6 @@ Disables SDK internal logging for lower CPU usage.
 # Start without a target (use IPC to select at runtime)
 sudo ./bin/DirettaRenderer
 
-# Start and auto-connect to target #1
-sudo ./bin/DirettaRenderer --target 1
-
 # With custom socket path
 sudo ./bin/DirettaRenderer --socket-path /tmp/my-renderer.sock
 
@@ -109,6 +106,8 @@ Edit `/etc/default/diretta-renderer`:
 TARGET=0                    # 0=none (IPC select), 1/2/3=auto-connect
 SOCKET_PATH=/tmp/diretta-renderer.sock
 INTERFACE=""                # or "eth0", "192.168.1.10"
+CPU_AUDIO=""                # optional: Diretta SDK worker core, e.g. 2
+CPU_OTHER=""                # optional: IPC/decode/logging core, e.g. 1
 VERBOSE=""
 NICE_LEVEL=-10
 IO_SCHED_CLASS=realtime
@@ -150,12 +149,38 @@ sudo ./systemd/uninstall-systemd.sh
 ## Testing
 
 ```bash
-# Start daemon
-sudo ./bin/DirettaRenderer
+# Start daemon without a startup target.
+sudo ./bin/DirettaRenderer --socket-path /tmp/diretta-renderer.sock --verbose
 
-# In another terminal:
-echo '{"cmd":"discover_targets"}' | socat - UNIX-CONNECT:/tmp/diretta-renderer.sock
-echo '{"cmd":"acquire_control"}' | socat - UNIX-CONNECT:/tmp/diretta-renderer.sock
-echo '{"cmd":"select_target","target":"1"}' | socat - UNIX-CONNECT:/tmp/diretta-renderer.sock
-echo '{"cmd":"status"}' | socat - UNIX-CONNECT:/tmp/diretta-renderer.sock
+# In another terminal, discover available targets:
+(printf '%s\n' '{"cmd":"discover_targets"}'; sleep 2) \
+| sudo socat -T 5 - UNIX-CONNECT:/tmp/diretta-renderer.sock
+
+# Select target #1:
+(printf '%s\n%s\n' \
+  '{"cmd":"acquire_control"}' \
+  '{"cmd":"select_target","target":"1"}'; sleep 3) \
+| sudo socat -T 12 - UNIX-CONNECT:/tmp/diretta-renderer.sock
+
+# Set URI:
+(printf '%s\n%s\n' \
+  '{"cmd":"acquire_control"}' \
+  '{"cmd":"set_uri","path":"/path/to/test.wav"}'; sleep 2) \
+| sudo socat -T 8 - UNIX-CONNECT:/tmp/diretta-renderer.sock
+
+# Play:
+(printf '%s\n%s\n' \
+  '{"cmd":"acquire_control"}' \
+  '{"cmd":"play"}'; sleep 5) \
+| sudo socat -T 10 - UNIX-CONNECT:/tmp/diretta-renderer.sock
+
+# Status:
+(printf '%s\n' '{"cmd":"status"}'; sleep 1) \
+| sudo socat -T 5 - UNIX-CONNECT:/tmp/diretta-renderer.sock
+
+# Stop:
+(printf '%s\n%s\n' \
+  '{"cmd":"acquire_control"}' \
+  '{"cmd":"stop"}'; sleep 2) \
+| sudo socat -T 6 - UNIX-CONNECT:/tmp/diretta-renderer.sock
 ```

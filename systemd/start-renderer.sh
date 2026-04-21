@@ -5,6 +5,7 @@
 set -e
 
 # Values sourced from /etc/default/diretta-renderer via EnvironmentFile in the systemd unit.
+TARGET="${TARGET:-0}"
 SOCKET_PATH="${SOCKET_PATH:-/tmp/diretta-renderer.sock}"
 VERBOSE="${VERBOSE:-}"
 INTERFACE="${INTERFACE:-${NETWORK_INTERFACE:-}}"
@@ -15,6 +16,8 @@ INFO_CYCLE="${INFO_CYCLE:-}"
 TRANSFER_MODE="${TRANSFER_MODE:-}"
 TARGET_PROFILE_LIMIT="${TARGET_PROFILE_LIMIT:-}"
 MTU="${MTU:-${MTU_OVERRIDE:-}}"
+CPU_AUDIO="${CPU_AUDIO:-}"
+CPU_OTHER="${CPU_OTHER:-}"
 
 # Process priority defaults
 NICE_LEVEL="${NICE_LEVEL:--10}"
@@ -26,6 +29,11 @@ RENDERER_BIN="/opt/diretta-renderer/DirettaRenderer"
 
 # Build command as array (preserves arguments with spaces)
 CMD=("$RENDERER_BIN")
+
+# Target selection (0 = no startup target, use IPC select_target)
+if [ -n "$TARGET" ]; then
+    CMD+=("--target" "$TARGET")
+fi
 
 # IPC socket path
 if [ -n "$SOCKET_PATH" ]; then
@@ -70,6 +78,14 @@ fi
 
 if [ -n "$MTU" ]; then
     CMD+=("--mtu" "$MTU")
+fi
+
+if [ -n "$CPU_AUDIO" ]; then
+    CMD+=("--cpu-audio" "$CPU_AUDIO")
+fi
+
+if [ -n "$CPU_OTHER" ]; then
+    CMD+=("--cpu-other" "$CPU_OTHER")
 fi
 
 if [ -n "$RT_PRIORITY" ] && [ "$RT_PRIORITY" != "50" ]; then
@@ -121,8 +137,11 @@ echo "  Starting Diretta Host Daemon"
 echo "════════════════════════════════════════════════════════"
 echo ""
 echo "Configuration:"
+echo "  Target:            $TARGET"
 echo "  Socket:            $SOCKET_PATH"
 echo "  Network Interface: ${INTERFACE:-auto-detect}"
+echo "  CPU audio:         ${CPU_AUDIO:-disabled}"
+echo "  CPU other:         ${CPU_OTHER:-disabled}"
 echo "  Nice level:        $NICE_LEVEL"
 echo "  I/O scheduling:    $IO_SCHED_CLASS (priority $IO_SCHED_PRIORITY)"
 echo "  RT priority:       $RT_PRIORITY (SCHED_FIFO)"

@@ -5,8 +5,8 @@ Documentation=https://github.com/cometdom/DirettaRendererUPnP
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 /opt/diretta-renderer-upnp/webui/diretta_webui.py \
-    --profile /opt/diretta-renderer-upnp/webui/profiles/diretta_renderer.json \
+ExecStart=/usr/bin/python3 /opt/diretta-renderer/webui/diretta_webui.py \
+    --profile /opt/diretta-renderer/webui/profiles/diretta_renderer.json \
     --port 8080
 Restart=on-failure
 RestartSec=5

@@ -26,7 +26,10 @@ public:
     // Callbacks (command handlers registered by DirettaRenderer)
     //=========================================================================
 
-    using PlayCallback = std::function<void(const std::string& path)>;
+    using PlayCallback = std::function<bool(const std::string& path, const std::string& metadata)>;
+    using SetUriCallback = std::function<bool(const std::string& path, const std::string& metadata)>;
+    using QueueNextCallback = std::function<bool(const std::string& path, const std::string& metadata)>;
+    using PlayNowCallback = std::function<bool(const std::string& path, const std::string& metadata)>;
     using ResumeCallback = std::function<void()>;
     using PauseCallback = std::function<void()>;
     using StopCallback = std::function<void()>;
@@ -50,6 +53,9 @@ public:
 
     struct Callbacks {
         PlayCallback onPlay;
+        SetUriCallback onSetUri;
+        QueueNextCallback onQueueNext;
+        PlayNowCallback onPlayNow;
         ResumeCallback onResume;
         PauseCallback onPause;
         StopCallback onStop;
@@ -135,6 +141,7 @@ private:
 
     void sendJson(int fd, const std::string& json);
     void broadcast(const std::string& json);
+    void broadcastBestEffort(const std::string& json);
     void sendStatus(int fd);
 
     //=========================================================================

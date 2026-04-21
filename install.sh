@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Diretta UPnP Renderer - Installation Script
+# Diretta Host Daemon - Installation Script
 #
 # This script helps install dependencies and set up the renderer.
 # Run with: bash install.sh
@@ -899,7 +899,7 @@ check_diretta_sdk() {
 # =============================================================================
 
 build_renderer() {
-    print_header "Building Diretta UPnP Renderer"
+    print_header "Building Diretta Host Daemon"
 
     cd "$SCRIPT_DIR"
 
@@ -927,7 +927,7 @@ build_renderer() {
         make NOLOG=1
     fi
 
-    if [ ! -f "bin/DirettaRendererUPnP" ]; then
+    if [ ! -f "bin/DirettaRenderer" ]; then
         print_error "Build failed. Please check error messages above."
         exit 1
     fi
@@ -1075,12 +1075,13 @@ configure_firewall() {
 setup_systemd_service() {
     print_header "Systemd Service Installation"
 
-    local INSTALL_DIR="/opt/diretta-renderer-upnp"
+    local INSTALL_DIR="/opt/diretta-renderer"
+    local OLD_INSTALL_DIR="/opt/diretta-renderer-upnp"
     local SERVICE_FILE="/etc/systemd/system/diretta-renderer.service"
     local CONFIG_FILE="/etc/default/diretta-renderer"
-    local OLD_CONFIG_FILE="$INSTALL_DIR/diretta-renderer.conf"
+    local OLD_CONFIG_FILE="$OLD_INSTALL_DIR/diretta-renderer.conf"
     local WRAPPER_SCRIPT="$INSTALL_DIR/start-renderer.sh"
-    local BINARY_PATH="$SCRIPT_DIR/bin/DirettaRendererUPnP"
+    local BINARY_PATH="$SCRIPT_DIR/bin/DirettaRenderer"
     local SYSTEMD_DIR="$SCRIPT_DIR/systemd"
 
     # Check if binary exists
@@ -1102,8 +1103,8 @@ setup_systemd_service() {
 
     print_info "2. Copying binary..."
     sudo cp "$BINARY_PATH" "$INSTALL_DIR/"
-    sudo chmod +x "$INSTALL_DIR/DirettaRendererUPnP"
-    print_success "Binary copied to $INSTALL_DIR/DirettaRendererUPnP"
+    sudo chmod +x "$INSTALL_DIR/DirettaRenderer"
+    print_success "Binary copied to $INSTALL_DIR/DirettaRenderer"
 
     print_info "3. Installing wrapper script..."
     if [ -f "$SYSTEMD_DIR/start-renderer.sh" ]; then
@@ -1114,16 +1115,14 @@ setup_systemd_service() {
         # Create a basic wrapper script if not found (v2.0.0 compatible)
         sudo tee "$WRAPPER_SCRIPT" > /dev/null <<'WRAPPER_EOF'
 #!/bin/bash
-# Diretta UPnP Renderer - Startup Wrapper Script
-# This script reads configuration and starts the renderer with appropriate options
+# Diretta Host Daemon - Startup Wrapper Script
+# This script reads configuration and starts the daemon with appropriate options
 
 set -e
 
 # Default values (can be overridden by config file)
-TARGET="${TARGET:-1}"
-PORT="${PORT:-4005}"
-NAME="${NAME:-${RENDERER_NAME:-}}"
-GAPLESS="${GAPLESS:-}"
+TARGET="${TARGET:-0}"
+SOCKET_PATH="${SOCKET_PATH:-/tmp/diretta-renderer.sock}"
 VERBOSE="${VERBOSE:-}"
 INTERFACE="${INTERFACE:-${NETWORK_INTERFACE:-}}"
 THREAD_MODE="${THREAD_MODE:-}"
@@ -1133,6 +1132,8 @@ INFO_CYCLE="${INFO_CYCLE:-}"
 TRANSFER_MODE="${TRANSFER_MODE:-}"
 TARGET_PROFILE_LIMIT="${TARGET_PROFILE_LIMIT:-}"
 MTU="${MTU:-${MTU_OVERRIDE:-}}"
+CPU_AUDIO="${CPU_AUDIO:-}"
+CPU_OTHER="${CPU_OTHER:-}"
 
 # Process priority defaults
 NICE_LEVEL="${NICE_LEVEL:--10}"
@@ -1140,34 +1141,24 @@ IO_SCHED_CLASS="${IO_SCHED_CLASS:-realtime}"
 IO_SCHED_PRIORITY="${IO_SCHED_PRIORITY:-0}"
 RT_PRIORITY="${RT_PRIORITY:-50}"
 
-RENDERER_BIN="/opt/diretta-renderer-upnp/DirettaRendererUPnP"
+RENDERER_BIN="/opt/diretta-renderer/DirettaRenderer"
 
 # Build command as array (preserves arguments with spaces)
 CMD=("$RENDERER_BIN")
 
-# Basic options
+# Target selection (0 = no startup target, use IPC select_target)
 CMD+=("--target" "$TARGET")
 
-# Renderer name (supports spaces, e.g., "Devialet Target")
-if [ -n "$NAME" ]; then
-    CMD+=("--name" "$NAME")
+# IPC socket path
+if [ -n "$SOCKET_PATH" ]; then
+    CMD+=("--socket-path" "$SOCKET_PATH")
 fi
 
-# UPnP port (if specified)
-if [ -n "$PORT" ]; then
-    CMD+=("--port" "$PORT")
-fi
-
-# Network interface option (CRITICAL for multi-homed systems)
+# Network interface option (for multi-homed systems)
 # --interface accepts both interface names (eth0) and IP addresses (192.168.1.32)
 if [ -n "$INTERFACE" ]; then
     echo "Binding to network interface: $INTERFACE"
     CMD+=("--interface" "$INTERFACE")
-fi
-
-# Gapless
-if [ -n "$GAPLESS" ]; then
-    CMD+=($GAPLESS)
 fi
 
 # Log verbosity (--verbose or --quiet)
@@ -1204,6 +1195,14 @@ if [ -n "$MTU" ]; then
     CMD+=("--mtu" "$MTU")
 fi
 
+if [ -n "$CPU_AUDIO" ]; then
+    CMD+=("--cpu-audio" "$CPU_AUDIO")
+fi
+
+if [ -n "$CPU_OTHER" ]; then
+    CMD+=("--cpu-other" "$CPU_OTHER")
+fi
+
 if [ -n "$RT_PRIORITY" ] && [ "$RT_PRIORITY" != "50" ]; then
     CMD+=("--rt-priority" "$RT_PRIORITY")
 fi
@@ -1233,13 +1232,15 @@ fi
 
 # Log the command being executed
 echo "════════════════════════════════════════════════════════"
-echo "  Starting Diretta UPnP Renderer"
+echo "  Starting Diretta Host Daemon"
 echo "════════════════════════════════════════════════════════"
 echo ""
 echo "Configuration:"
 echo "  Target:            $TARGET"
-echo "  Name:              ${NAME:-Diretta Renderer (default)}"
+echo "  Socket:            $SOCKET_PATH"
 echo "  Network Interface: ${INTERFACE:-auto-detect}"
+echo "  CPU audio:         ${CPU_AUDIO:-disabled}"
+echo "  CPU other:         ${CPU_OTHER:-disabled}"
 echo "  Nice level:        $NICE_LEVEL"
 echo "  I/O scheduling:    $IO_SCHED_CLASS (priority $IO_SCHED_PRIORITY)"
 echo "  RT priority:       $RT_PRIORITY (SCHED_FIFO)"
@@ -1290,7 +1291,7 @@ WRAPPER_EOF
         fi
 
         # Migrate settings from old config
-        local KNOWN_KEYS="TARGET PORT NAME RENDERER_NAME GAPLESS VERBOSE MINIMAL_UPNP INTERFACE NETWORK_INTERFACE THREAD_MODE CYCLE_TIME CYCLE_MIN_TIME INFO_CYCLE TRANSFER_MODE TARGET_PROFILE_LIMIT MTU MTU_OVERRIDE NICE_LEVEL IO_SCHED_CLASS IO_SCHED_PRIORITY RT_PRIORITY"
+        local KNOWN_KEYS="TARGET PORT NAME RENDERER_NAME GAPLESS VERBOSE MINIMAL_UPNP INTERFACE NETWORK_INTERFACE THREAD_MODE CYCLE_TIME CYCLE_MIN_TIME INFO_CYCLE TRANSFER_MODE TARGET_PROFILE_LIMIT MTU MTU_OVERRIDE CPU_AUDIO CPU_OTHER NICE_LEVEL IO_SCHED_CLASS IO_SCHED_PRIORITY RT_PRIORITY"
         local migrated_keys=""
         local obsolete_keys=""
 
@@ -1346,7 +1347,7 @@ WRAPPER_EOF
         # Create service file if not found (fallback, matches systemd/diretta-renderer.service)
         sudo tee "$SERVICE_FILE" > /dev/null <<'SERVICE_EOF'
 [Unit]
-Description=Diretta UPnP Renderer
+Description=Diretta Host Daemon
 Documentation=https://github.com/cometdom/DirettaRendererUPnP
 After=network-online.target
 Wants=network-online.target
@@ -1354,9 +1355,9 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/opt/diretta-renderer-upnp
+WorkingDirectory=/opt/diretta-renderer
 EnvironmentFile=-/etc/default/diretta-renderer
-ExecStart=/opt/diretta-renderer-upnp/start-renderer.sh
+ExecStart=/opt/diretta-renderer/start-renderer.sh
 
 # Restart policy
 Restart=on-failure
@@ -1376,9 +1377,9 @@ CapabilityBoundingSet=CAP_NET_RAW CAP_NET_ADMIN CAP_SYS_NICE
 # --- Filesystem isolation ---
 ProtectSystem=strict
 ProtectHome=true
-PrivateTmp=true
-ReadOnlyPaths=/opt/diretta-renderer-upnp
-ReadWritePaths=/var/log
+PrivateTmp=false
+ReadOnlyPaths=/opt/diretta-renderer
+ReadWritePaths=/var/log /tmp
 
 # --- Device and kernel isolation ---
 PrivateDevices=true
@@ -1448,7 +1449,7 @@ SERVICE_EOF
 # =============================================================================
 
 setup_webui() {
-    local INSTALL_DIR="/opt/diretta-renderer-upnp"
+    local INSTALL_DIR="/opt/diretta-renderer"
     local WEBUI_DIR="$INSTALL_DIR/webui"
     local WEBUI_SERVICE_FILE="/etc/systemd/system/diretta-renderer-webui.service"
     local WEBUI_SRC="$SCRIPT_DIR/webui"
@@ -1499,8 +1500,8 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 /opt/diretta-renderer-upnp/webui/diretta_webui.py \
-    --profile /opt/diretta-renderer-upnp/webui/profiles/diretta_renderer.json \
+ExecStart=/usr/bin/python3 /opt/diretta-renderer/webui/diretta_webui.py \
+    --profile /opt/diretta-renderer/webui/profiles/diretta_renderer.json \
     --port 8080
 Restart=on-failure
 RestartSec=5
@@ -1657,7 +1658,7 @@ SYSCTL
 show_main_menu() {
     echo ""
     echo "============================================"
-    echo " Diretta UPnP Renderer - Installation"
+    echo " Diretta Host Daemon - Installation"
     echo "============================================"
     echo ""
     echo "Installation options:"
@@ -1715,8 +1716,8 @@ run_full_installation() {
     echo "  4. View logs:"
     echo "     sudo journalctl -u diretta-renderer -f"
     echo ""
-    echo "  5. Open your UPnP control point (JPlay, BubbleUPnP, etc.)"
-    echo "     Select 'Diretta Renderer' as output device"
+    echo "  5. Test IPC discovery:"
+    echo "     (printf '%s\n' '{\"cmd\":\"discover_targets\"}'; sleep 2) | sudo socat -T 5 - UNIX-CONNECT:/tmp/diretta-renderer.sock"
     echo ""
     echo "Documentation:"
     echo "  - README.md - Overview and quick start"

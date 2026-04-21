@@ -6,7 +6,7 @@ JSON over Unix domain socket. Line-delimited messages (one JSON object per line,
 
 - **Multiple connections** can connect simultaneously
 - **All connections** can send: `discover_targets`, `status`, `acquire_control`, `release_control`
-- **Only one connection** at a time holds control (can send play/pause/stop/seek/select_target)
+- **Only one connection** at a time holds control (can send play/set_uri/queue_next/play_now/pause/stop/seek/select_target)
 - **All connections** receive push notifications (state change, track change, position)
 
 ## Socket Path
@@ -146,9 +146,66 @@ Start playback. Requires control.
 {"cmd":"play","path":"/nas/music/song.flac"}
 ```
 
+When already playing, `play` with a different `path` queues the path as the next
+track for gapless/preloaded playback. Use `play_now` for an immediate replacement.
+
 **Resume from pause (no path):**
 ```json
 {"cmd":"play"}
+```
+
+**Response:**
+```json
+{"ok":true}
+```
+
+---
+
+### `set_uri`
+
+Set the current track without starting playback. Requires control.
+
+If playback is active, this first stops the current track using the same
+transition path as the original UPnP `SetAVTransportURI` handler.
+
+**Request:**
+```json
+{"cmd":"set_uri","path":"/nas/music/song.flac"}
+```
+
+**Response:**
+```json
+{"ok":true}
+```
+
+---
+
+### `queue_next`
+
+Queue the next track for gapless/preloaded transition. Requires control.
+
+**Request:**
+```json
+{"cmd":"queue_next","path":"/nas/music/next.flac"}
+```
+
+**Response:**
+```json
+{"ok":true}
+```
+
+---
+
+### `play_now`
+
+Immediately replace current playback with a new track. Requires control.
+
+This is the explicit stop/reopen path. Use it for user-initiated skip/replace,
+not for normal sequential playlist preloading.
+
+**Request:**
+```json
+{"cmd":"play_now","path":"/nas/music/song.flac"}
 ```
 
 **Response:**
@@ -288,17 +345,23 @@ Pushed every 1 second while playing.
 
 ## Interaction Example
 
-```
-Client → {"cmd":"accover_control"}
-Server ← {"ok":true}
+Start the daemon without a startup target. The client discovers and selects the
+runtime target through IPC, sets the current URI, then starts playback.
 
+```
 Client → {"cmd":"discover_targets"}
 Server ← {"ok":true,"targets":[...],"count":2}
+
+Client → {"cmd":"acquire_control"}
+Server ← {"ok":true}
 
 Client → {"cmd":"select_target","target":"1"}
 Server ← {"ok":true}
 
-Client → {"cmd":"play","path":"/nas/song.flac"}
+Client → {"cmd":"set_uri","path":"/nas/song.flac"}
+Server ← {"ok":true}
+
+Client → {"cmd":"play"}
 Server ← {"ok":true}
 
 Server ← {"event":"state_change","transport":"playing"}
@@ -306,5 +369,34 @@ Server ← {"event":"track_change","path":"/nas/song.flac","sampleRate":96000,..
 Server ← {"event":"position","position":1.0,"duration":180.0}
 Server ← {"event":"position","position":2.0,"duration":180.0}
 ...
+Client → {"cmd":"queue_next","path":"/nas/next.flac"}
+Server ← {"ok":true}
+Server ← {"event":"track_change","path":"/nas/next.flac","sampleRate":96000,...}
 Server ← {"event":"state_change","transport":"stopped"}
+```
+
+## Shell Smoke Test
+
+When testing manually with `socat`, keep the connection open briefly after
+sending each request. Discovery, target selection, and open/play can take longer
+than the time it takes for `printf` to close stdin.
+
+```bash
+(printf '%s\n' '{"cmd":"discover_targets"}'; sleep 2) \
+| sudo socat -T 5 - UNIX-CONNECT:/tmp/diretta-renderer.sock
+
+(printf '%s\n%s\n' \
+  '{"cmd":"acquire_control"}' \
+  '{"cmd":"select_target","target":"1"}'; sleep 3) \
+| sudo socat -T 12 - UNIX-CONNECT:/tmp/diretta-renderer.sock
+
+(printf '%s\n%s\n' \
+  '{"cmd":"acquire_control"}' \
+  '{"cmd":"set_uri","path":"/path/to/test.wav"}'; sleep 2) \
+| sudo socat -T 8 - UNIX-CONNECT:/tmp/diretta-renderer.sock
+
+(printf '%s\n%s\n' \
+  '{"cmd":"acquire_control"}' \
+  '{"cmd":"play"}'; sleep 5) \
+| sudo socat -T 10 - UNIX-CONNECT:/tmp/diretta-renderer.sock
 ```
