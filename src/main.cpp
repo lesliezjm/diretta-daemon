@@ -174,6 +174,17 @@ DirettaRenderer::Config parseArguments(int argc, char* argv[]) {
         else if (arg == "--target-profile-limit" && i + 1 < argc) {
             config.targetProfileLimitTime = std::atoi(argv[++i]);
         }
+        else if (arg == "--pcm-output-mode" && i + 1 < argc) {
+            config.pcmOutputMode = argv[++i];
+            if (config.pcmOutputMode != "auto" &&
+                config.pcmOutputMode != "force16" &&
+                config.pcmOutputMode != "force24" &&
+                config.pcmOutputMode != "force32" &&
+                config.pcmOutputMode != "prefer32") {
+                std::cerr << "Invalid pcm-output-mode. Use: auto, force16, force24, force32, prefer32" << std::endl;
+                exit(1);
+            }
+        }
         else if (arg == "--mtu" && i + 1 < argc) {
             config.mtu = std::atoi(argv[++i]);
         }
@@ -222,6 +233,7 @@ DirettaRenderer::Config parseArguments(int argc, char* argv[]) {
                       << "  --info-cycle <us>          Info packet cycle in microseconds (default: 100000)\n"
                       << "  --transfer-mode <mode>     Transfer mode: auto, varmax, varauto, fixauto, random\n"
                       << "  --target-profile-limit <us> Target profile limit (0=SelfProfile, default: 0)\n"
+                      << "  --pcm-output-mode <mode>   PCM diagnostic mode: auto, force16, force24, force32, prefer32\n"
                       << "  --mtu <bytes>              MTU override (default: auto-detect)\n"
                       << "  --rt-priority <1-99>       SCHED_FIFO real-time priority (default: 50)\n"
                       << "  --cpu-audio <core>         Pin Diretta worker/SDK occupied thread to core\n"
@@ -311,6 +323,7 @@ int main(int argc, char* argv[]) {
     if (!config.networkInterface.empty()) {
         std::cout << "  Network:  " << config.networkInterface << std::endl;
     }
+    std::cout << "  PCM mode: " << config.pcmOutputMode << std::endl;
     if (config.cpuAudio >= 0) {
         std::cout << "  CPU audio: core " << config.cpuAudio << std::endl;
     }

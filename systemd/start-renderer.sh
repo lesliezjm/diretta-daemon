@@ -14,6 +14,7 @@ CYCLE_TIME="${CYCLE_TIME:-}"
 CYCLE_MIN_TIME="${CYCLE_MIN_TIME:-}"
 INFO_CYCLE="${INFO_CYCLE:-}"
 TRANSFER_MODE="${TRANSFER_MODE:-}"
+PCM_OUTPUT_MODE="${PCM_OUTPUT_MODE:-auto}"
 TARGET_PROFILE_LIMIT="${TARGET_PROFILE_LIMIT:-}"
 MTU="${MTU:-${MTU_OVERRIDE:-}}"
 CPU_AUDIO="${CPU_AUDIO:-}"
@@ -70,6 +71,10 @@ fi
 
 if [ -n "$TRANSFER_MODE" ]; then
     CMD+=("--transfer-mode" "$TRANSFER_MODE")
+fi
+
+if [ -n "$PCM_OUTPUT_MODE" ] && [ "$PCM_OUTPUT_MODE" != "auto" ]; then
+    CMD+=("--pcm-output-mode" "$PCM_OUTPUT_MODE")
 fi
 
 if [ -n "$TARGET_PROFILE_LIMIT" ]; then
@@ -140,6 +145,7 @@ echo "Configuration:"
 echo "  Target:            $TARGET"
 echo "  Socket:            $SOCKET_PATH"
 echo "  Network Interface: ${INTERFACE:-auto-detect}"
+echo "  PCM output mode:   $PCM_OUTPUT_MODE"
 echo "  CPU audio:         ${CPU_AUDIO:-disabled}"
 echo "  CPU other:         ${CPU_OTHER:-disabled}"
 echo "  Nice level:        $NICE_LEVEL"

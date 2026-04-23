@@ -24,6 +24,7 @@
 | `--info-cycle <us>` | Info packet cycle (µs) | `100000` |
 | `--transfer-mode <mode>` | Transfer mode (see below) | `auto` |
 | `--target-profile-limit <us>` | 0=SelfProfile (stable), >0=TargetProfile (experimental) | `0` |
+| `--pcm-output-mode <mode>` | PCM sink bit-depth diagnostic mode (see below) | `auto` |
 | `--mtu <bytes>` | MTU override (auto-detect default) | auto |
 | `--rt-priority <1-99>` | SCHED_FIFO real-time priority for audio thread | `50` |
 | `--cpu-audio <core>` | Pin Diretta SDK occupied worker thread to a CPU core | disabled |
@@ -56,6 +57,18 @@ Examples: `1` = default, `17` = CRITICAL + OCCUPIED, `33` = CRITICAL + FEEDBACK3
 | `fixauto` | Fixed cycle, auto-tuned |
 | `random` | Random cycle (also set `--cycle-min-time`) |
 
+### PCM Output Modes
+
+These modes are for diagnosing sink bit-depth negotiation. Force modes do not fall back.
+
+| Mode | Description |
+|------|-------------|
+| `auto` | Current default negotiation |
+| `force16` | Require 16-bit PCM sink support |
+| `force24` | Require 24-bit PCM sink support |
+| `force32` | Require 32-bit PCM sink support |
+| `prefer32` | Try 32-bit first, then fall back to default order |
+
 ## Systemd Configuration
 
 The service reads `/etc/default/diretta-renderer` (see `systemd/diretta-renderer.conf`):
@@ -77,6 +90,9 @@ CPU_OTHER=""
 
 # Log level
 VERBOSE=""
+
+# PCM output mode
+PCM_OUTPUT_MODE=auto
 
 # Process priority
 NICE_LEVEL=-10

@@ -39,6 +39,7 @@ public:
         int infoCycle = -1;        // Info packet cycle in µs (default: 100000 = 100ms)
         int cycleMinTime = -1;     // Min cycle time in µs (default: unused, random mode only)
         std::string transferMode;  // Transfer mode: auto|varmax|varauto|fixauto|random
+        std::string pcmOutputMode = "auto";  // PCM diagnostic mode: auto|force16|force24|force32|prefer32
         int mtu = -1;             // MTU override in bytes (default: auto-detect)
         int targetProfileLimitTime = -1;  // 0=SelfProfile (stable, default), >0=TargetProfile limit in µs (experimental)
 
@@ -102,6 +103,7 @@ private:
     // Current track info
     std::string m_currentURI;
     std::string m_currentMetadata;
+    std::string m_lastS24HintKey;
 
     // Callback synchronization (lock-free for hot path)
     std::atomic<bool> m_callbackRunning{false};

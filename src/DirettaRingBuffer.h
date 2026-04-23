@@ -175,12 +175,7 @@ public:
     void clear() {
         writePos_.store(0, std::memory_order_release);
         readPos_.store(0, std::memory_order_release);
-        // Reset all S24 state to allow fresh detection for new tracks
-        // New track will set hint via setS24PackModeHint() if available
-        m_s24PackMode = S24PackMode::Unknown;
-        m_s24Hint = S24PackMode::Unknown;
-        m_s24DetectionConfirmed = false;
-        m_deferredSampleCount = 0;
+        resetS24PackMode();
     }
 
     void fillWithSilence() {
@@ -1422,8 +1417,27 @@ public:
         }
     }
 
+    void resetS24PackMode() {
+        // Reset all S24 state to allow fresh detection for new tracks.
+        // New track will set hint via setS24PackModeHint() if available.
+        m_s24PackMode = S24PackMode::Unknown;
+        m_s24Hint = S24PackMode::Unknown;
+        m_s24DetectionConfirmed = false;
+        m_deferredSampleCount = 0;
+    }
+
     S24PackMode getS24PackMode() const { return m_s24PackMode; }
     S24PackMode getS24Hint() const { return m_s24Hint; }
+
+    static const char* s24PackModeName(S24PackMode mode) {
+        switch (mode) {
+            case S24PackMode::Unknown: return "Unknown";
+            case S24PackMode::LsbAligned: return "LSB";
+            case S24PackMode::MsbAligned: return "MSB";
+            case S24PackMode::Deferred: return "Deferred";
+        }
+        return "Unknown";
+    }
 
 private:
     /**
