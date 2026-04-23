@@ -55,6 +55,15 @@ namespace FlowControl {
 
 static constexpr int IDLE_RELEASE_TIMEOUT_S = 5;
 
+static PcmOutputMode parsePcmOutputMode(const std::string& mode) {
+    if (mode.empty() || mode == "auto") return PcmOutputMode::AUTO;
+    if (mode == "force16") return PcmOutputMode::FORCE_16;
+    if (mode == "force24") return PcmOutputMode::FORCE_24;
+    if (mode == "force32") return PcmOutputMode::FORCE_32;
+    if (mode == "prefer32") return PcmOutputMode::PREFER_32;
+    return PcmOutputMode::AUTO;
+}
+
 //=============================================================================
 // Config
 //=============================================================================
@@ -305,6 +314,7 @@ bool DirettaRenderer::start(std::atomic<bool>* stopSignal) {
         }
         if (m_config.targetProfileLimitTime >= 0)
             m_syncConfig->targetProfileLimitTime = static_cast<unsigned int>(m_config.targetProfileLimitTime);
+        m_syncConfig->pcmOutputMode = parsePcmOutputMode(m_config.pcmOutputMode);
         if (m_config.cpuAudio >= 0)
             m_syncConfig->cpuAudio = m_config.cpuAudio;
         if (m_config.cpuOther >= 0)
@@ -326,6 +336,8 @@ bool DirettaRenderer::start(std::atomic<bool>* stopSignal) {
         if (m_config.targetProfileLimitTime >= 0)
             std::cout << "[DirettaRenderer] Target profile limit: " << m_syncConfig->targetProfileLimitTime
                       << " us (" << (m_syncConfig->targetProfileLimitTime > 0 ? "TargetProfile" : "SelfProfile") << ")" << std::endl;
+        if (m_config.pcmOutputMode != "auto")
+            std::cout << "[DirettaRenderer] PCM output mode: " << m_config.pcmOutputMode << std::endl;
         if (m_config.cpuAudio >= 0)
             std::cout << "[DirettaRenderer] CPU audio (Diretta worker): core " << m_config.cpuAudio << std::endl;
         if (m_config.cpuOther >= 0)
@@ -436,10 +448,18 @@ bool DirettaRenderer::start(std::atomic<bool>* stopSignal) {
                         std::cerr << "[Callback] Failed to open DirettaSync" << std::endl;
                         return false;
                     }
+                    m_lastS24HintKey.clear();
+                }
 
-                    // Propagate S24 alignment hint to ring buffer for 24-bit PCM
-                    // This helps detection when track starts with silence
-                    if (!format.isDSD && bitDepth == 24 &&
+                // Propagate S24 alignment hint once per PCM track, even when
+                // gapless/same-format promotion avoids a DirettaSync::open().
+                std::string s24HintKey = trackInfo.uri + "|" +
+                    std::to_string(sampleRate) + "|" +
+                    std::to_string(bitDepth) + "|" +
+                    std::to_string(channels);
+                if (!format.isDSD && s24HintKey != m_lastS24HintKey) {
+                    m_lastS24HintKey = s24HintKey;
+                    if (bitDepth == 24 &&
                         trackInfo.s24Alignment != TrackInfo::S24Alignment::Unknown) {
                         DirettaRingBuffer::S24PackMode hint =
                             (trackInfo.s24Alignment == TrackInfo::S24Alignment::LsbAligned)
@@ -448,6 +468,8 @@ bool DirettaRenderer::start(std::atomic<bool>* stopSignal) {
                         m_direttaSync->setS24PackModeHint(hint);
                         DEBUG_LOG("[Callback] Set S24 hint: "
                                   << (hint == DirettaRingBuffer::S24PackMode::LsbAligned ? "LSB" : "MSB"));
+                    } else {
+                        m_direttaSync->resetS24PackMode();
                     }
                 }
 
@@ -746,10 +768,17 @@ bool DirettaRenderer::selectTarget(int targetIndex, std::atomic<bool>* stopSigna
     {
         AudioFormat warmupFmt;
         warmupFmt.sampleRate = 44100;
-        warmupFmt.bitDepth = 24;
+        warmupFmt.bitDepth = 16;
+        if (m_config.pcmOutputMode == "force24") {
+            warmupFmt.bitDepth = 24;
+        } else if (m_config.pcmOutputMode == "force32" ||
+                   m_config.pcmOutputMode == "prefer32") {
+            warmupFmt.bitDepth = 32;
+        }
         warmupFmt.channels = 2;
         warmupFmt.isDSD = false;
-        std::cout << "[DirettaRenderer] Pre-connecting (warmup)..." << std::endl;
+        std::cout << "[DirettaRenderer] Pre-connecting (warmup "
+                  << warmupFmt.bitDepth << "-bit)..." << std::endl;
         if (m_direttaSync->open(warmupFmt)) {
             m_direttaSync->stopPlayback(true);
             m_lastStopTime = std::chrono::steady_clock::now();

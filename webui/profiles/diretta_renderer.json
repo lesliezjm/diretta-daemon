@@ -139,6 +139,20 @@
                     ]
                 },
                 {
+                    "key": "PCM_OUTPUT_MODE",
+                    "type": "select",
+                    "label": "PCM Output Mode",
+                    "description": "Diagnostic PCM sink bit-depth mode. Force modes do not fall back.",
+                    "default": "auto",
+                    "options": [
+                        {"value": "auto", "label": "Auto (default)"},
+                        {"value": "force16", "label": "Force 16-bit"},
+                        {"value": "force24", "label": "Force 24-bit"},
+                        {"value": "force32", "label": "Force 32-bit"},
+                        {"value": "prefer32", "label": "Prefer 32-bit"}
+                    ]
+                },
+                {
                     "key": "CYCLE_TIME",
                     "type": "number",
                     "label": "Cycle Time (us)",

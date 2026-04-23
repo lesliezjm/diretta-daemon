@@ -310,6 +310,7 @@ private:
 //=============================================================================
 
 enum class DirettaTransferMode { FIX_AUTO, VAR_AUTO, VAR_MAX, RANDOM, AUTO };
+enum class PcmOutputMode { AUTO, FORCE_16, FORCE_24, FORCE_32, PREFER_32 };
 
 //=============================================================================
 // Configuration
@@ -325,6 +326,7 @@ struct DirettaConfig {
     unsigned int infoCycle = 100000;  // Info packet cycle in µs (SDK default: 100ms)
     unsigned int cycleMinTime = 0;   // 0 = unused (only for random transfer mode)
     unsigned int targetProfileLimitTime = 0;  // 0=SelfProfile (stable), >0=TargetProfile (experimental, LimitCycleTime µs)
+    PcmOutputMode pcmOutputMode = PcmOutputMode::AUTO;
     unsigned int dacStabilizationMs = DirettaBuffer::DAC_STABILIZATION_MS;
     unsigned int onlineWaitMs = DirettaBuffer::ONLINE_WAIT_MS;
     unsigned int formatSwitchDelayMs = DirettaBuffer::FORMAT_SWITCH_DELAY_MS;
@@ -440,6 +442,16 @@ public:
      */
     void setS24PackModeHint(DirettaRingBuffer::S24PackMode hint) {
         m_ringBuffer.setS24PackModeHint(hint);
+        DIRETTA_LOG("S24 hint="
+                    << DirettaRingBuffer::s24PackModeName(hint)
+                    << " effective="
+                    << DirettaRingBuffer::s24PackModeName(m_ringBuffer.getS24PackMode()));
+    }
+
+    void resetS24PackMode() {
+        m_ringBuffer.resetS24PackMode();
+        DIRETTA_LOG("S24 hint=reset effective="
+                    << DirettaRingBuffer::s24PackModeName(m_ringBuffer.getS24PackMode()));
     }
 
     //=========================================================================
@@ -524,7 +536,8 @@ private:
 
     void configureSinkPCM(int rate, int channels, int inputBits, int& acceptedBits);
     void configureSinkDSD(uint32_t dsdBitRate, int channels, const AudioFormat& format);
-    void configureRingPCM(int rate, int channels, int direttaBps, int inputBps);
+    void configureRingPCM(int rate, int channels, int direttaBps, int inputBps,
+                          int inputBits, int sinkBits);
     void configureRingDSD(uint32_t byteRate, int channels);
     void beginReconfigure();
     void endReconfigure();
@@ -555,6 +568,8 @@ private:
 
     // Target
     ACQUA::IPAddress m_targetAddress;
+    std::string m_targetName;
+    std::string m_targetOutput;
     int m_targetIndex = -1;
     uint32_t m_mtuOverride = 0;
     uint32_t m_effectiveMTU = 1500;
@@ -613,6 +628,8 @@ private:
     std::atomic<int> m_channels{2};
     std::atomic<int> m_bytesPerSample{2};
     std::atomic<int> m_inputBytesPerSample{2};
+    std::atomic<int> m_inputBitDepth{16};
+    std::atomic<int> m_sinkBitDepth{16};
     std::atomic<int> m_bytesPerBuffer{176};
     std::atomic<int> m_bytesPerFrame{0};
     std::atomic<uint32_t> m_framesPerBufferRemainder{0};
@@ -643,7 +660,11 @@ private:
     bool m_cachedUpsample16to24{false};
     int m_cachedChannels{2};
     int m_cachedBytesPerSample{2};
+    int m_cachedInputBytesPerSample{2};
+    int m_cachedInputBitDepth{16};
+    int m_cachedSinkBitDepth{16};
     DirettaRingBuffer::DSDConversionMode m_cachedDsdConversionMode{DirettaRingBuffer::DSDConversionMode::Passthrough};
+    uint32_t m_lastS24EffectiveLogGen{UINT32_MAX};
 
     // C1: Consumer generation counter for getNewStream fast path
     // Incremented alongside m_formatGeneration in configureRingXXX

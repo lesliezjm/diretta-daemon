@@ -121,14 +121,19 @@ bool AudioDecoder::open(const std::string& url) {
     const char* urlCStr = url.c_str();
     bool isStreamingProxy = (strcasestr(urlCStr, "qobuz") != nullptr ||
                              strcasestr(urlCStr, "tidal") != nullptr);
+    bool hasUrlScheme = url.find("://") != std::string::npos;
+    bool isFileUrl = url.rfind("file://", 0) == 0;
+    bool isNetworkUrl = hasUrlScheme && !isFileUrl;
+    bool isLocalFile = !hasUrlScheme || isFileUrl;
 
-    bool isLocalServer = !isStreamingProxy &&
+    bool isLocalServer = isNetworkUrl && !isStreamingProxy &&
                          (url.find("://192.168.") != std::string::npos ||
                           url.find("://10.") != std::string::npos ||
                           url.find("://172.") != std::string::npos ||
                           url.find("://169.254.") != std::string::npos ||
                           url.find("://localhost") != std::string::npos ||
                           url.find("://127.") != std::string::npos);
+    bool isRemoteStream = isStreamingProxy || (isNetworkUrl && !isLocalServer);
 
     if (url.find(".dsf") != std::string::npos || url.find(".DSF") != std::string::npos) {
         inputFormat = av_find_input_format("dsf");
@@ -153,7 +158,9 @@ bool AudioDecoder::open(const std::string& url) {
         DEBUG_LOG("[AudioDecoder] Streaming proxy detected (Qobuz/Tidal via local server) - using robust HTTP options");
     }
 
-    if (isLocalServer) {
+    if (isLocalFile) {
+        DEBUG_LOG("[AudioDecoder] Local file detected - using file options");
+    } else if (isLocalServer) {
         // Local servers (Audirvana, JRiver, etc.) - use simple HTTP options
         // These servers often don't support persistent connections or reconnection
         DEBUG_LOG("[AudioDecoder] Local server detected - using simple HTTP options");
@@ -317,7 +324,7 @@ bool AudioDecoder::open(const std::string& url) {
     );
 
     m_trackInfo.isCompressed = !isUncompressedPCM;
-    m_trackInfo.isRemoteStream = !isLocalServer;
+    m_trackInfo.isRemoteStream = isRemoteStream;
 
     if (isUncompressedPCM) {
         DEBUG_LOG("[AudioDecoder] Uncompressed PCM (WAV/AIFF) - low latency path");
