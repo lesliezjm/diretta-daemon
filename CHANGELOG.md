@@ -1,5 +1,22 @@
 # Changelog
 
+## [3.0.3] - 2026-04-23
+
+### Added
+- Added `--pcm-output-mode` / `PCM_OUTPUT_MODE` with `auto`, `force16`, `force24`, `force32`, and `prefer32` modes for PCM sink bit-depth negotiation.
+- Added verbose PCM negotiation diagnostics for source format, target output, sink bit-depth support, selected sink bits, and first-send conversion path.
+- Exposed PCM output mode in systemd configuration, install migration, Web UI profile, and configuration documentation.
+
+### Changed
+- Changed `auto` PCM negotiation to prefer the source bit depth first, avoiding unnecessary 16-bit to 24-bit packed promotion when the sink supports native 16-bit PCM.
+- Aligned target warmup bit depth with the selected PCM output mode to avoid unwanted 24-bit packed setup during pre-connect.
+
+### Fixed
+- Fixed local filesystem paths and `file://` URLs being classified as remote streams.
+- Reset and report S24 packed-mode hints across PCM track changes to avoid stale 24-bit packing state.
+
+---
+
 ## [3.0.2] - 2026-04-21
 
 ### Fixed

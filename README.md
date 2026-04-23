@@ -1,4 +1,4 @@
-# Diretta Host Daemon v3.0.2
+# Diretta Host Daemon v3.0.3
 
 > **Based on [DirettaRendererUPnP](https://github.com/cometdom/DirettaRendererUPnP) by Dominique COMET (cometdom)** — v3.0 removes the UPnP/DLNA layer and replaces it with a Unix socket IPC interface for integration with external music players.
 
@@ -110,6 +110,7 @@ make NOLOG=1                     # Production build (no SDK logging)
 
 ## Version History
 
+- **v3.0.3** — Add PCM output bit-depth negotiation modes, improve PCM/S24 diagnostics, fix local file stream classification, and align warmup bit depth with PCM mode.
 - **v3.0.2** — Fix IPC playback lifecycle, add explicit `set_uri`/`queue_next`/`play_now`, restore CPU affinity configuration, and update socket playback integration docs.
 - **v3.0.1** — Fix systemd install/uninstall scripts and service reliability.
 - **v3.0.0** — Stripped UPnP/DLNA layer. Unix socket IPC interface. Runtime target selection via `select_target` command.
