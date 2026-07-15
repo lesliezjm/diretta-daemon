@@ -299,6 +299,11 @@ public:
     using TrackEndCallback = std::function<void()>;
 
     /**
+     * @brief Callback after an asynchronous seek has actually completed.
+     */
+    using SeekCompleteCallback = std::function<void(double, bool)>;
+
+    /**
      * @brief Constructor
      */
     AudioEngine();
@@ -326,6 +331,8 @@ public:
      */
     void setTrackEndCallback(const TrackEndCallback& callback);
 
+    void setSeekCompleteCallback(const SeekCompleteCallback& callback);
+
     /**
      * @brief Set current track URI
      * @param uri Track URI
@@ -339,6 +346,11 @@ public:
      * @param metadata Track metadata (optional)
      */
     void setNextURI(const std::string& uri, const std::string& metadata = "");
+
+    /**
+     * @brief Cancel any pending or already-preloaded next track.
+     */
+    void clearNextURI();
 
     /**
      * @brief Start playback
@@ -418,6 +430,7 @@ private:
     std::string m_nextMetadata;
     TrackInfo m_currentTrackInfo;
     TrackEndCallback m_trackEndCallback;
+    SeekCompleteCallback m_seekCompleteCallback;
 
     // Decoders
     std::unique_ptr<AudioDecoder> m_currentDecoder;

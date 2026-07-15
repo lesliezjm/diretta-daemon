@@ -188,6 +188,15 @@ bool DirettaRenderer::queueNextLocked(const std::string& path, const std::string
     return true;
 }
 
+bool DirettaRenderer::clearNextLocked() {
+    if (!m_audioEngine) {
+        return false;
+    }
+    std::cout << "[DirettaRenderer] Clear queued next track" << std::endl;
+    m_audioEngine->clearNextURI();
+    return true;
+}
+
 bool DirettaRenderer::playCurrentLocked() {
     if (!m_audioEngine || !m_direttaSync || m_currentURI.empty()) {
         return false;
@@ -611,6 +620,12 @@ bool DirettaRenderer::start(std::atomic<bool>* stopSignal) {
             }
         });
 
+        m_audioEngine->setSeekCompleteCallback([this](double position, bool ok) {
+            if (m_ipc) {
+                m_ipc->notifySeekComplete(position, ok);
+            }
+        });
+
         //=====================================================================
         // IPC Command Handlers (replace UPnP callbacks)
         //=====================================================================
@@ -632,6 +647,11 @@ bool DirettaRenderer::start(std::atomic<bool>* stopSignal) {
         ipcCallbacks.onQueueNext = [this](const std::string& path, const std::string& metadata) -> bool {
             std::lock_guard<std::mutex> lock(m_mutex);
             return queueNextLocked(path, metadata);
+        };
+
+        ipcCallbacks.onClearNext = [this]() -> bool {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            return clearNextLocked();
         };
 
         ipcCallbacks.onPlayNow = [this](const std::string& path, const std::string& metadata) -> bool {
@@ -690,13 +710,14 @@ bool DirettaRenderer::start(std::atomic<bool>* stopSignal) {
             m_idleTimerActive.store(true, std::memory_order_release);
         };
 
-        ipcCallbacks.onSeek = [this](double seconds) {
+        ipcCallbacks.onSeek = [this](double seconds) -> bool {
             std::lock_guard<std::mutex> lock(m_mutex);
             std::cout << "[DirettaRenderer] Seek: " << seconds << "s" << std::endl;
 
             if (m_audioEngine) {
-                m_audioEngine->seek(seconds);
+                return m_audioEngine->seek(seconds);
             }
+            return false;
         };
 
         ipcCallbacks.onShutdown = [this]() {

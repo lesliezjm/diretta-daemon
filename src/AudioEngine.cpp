@@ -1694,6 +1694,7 @@ void AudioEngine::setCurrentURI(const std::string& uri, const std::string& metad
         m_silenceCount = 0;
         m_isDraining = false;
         m_formatChangePending = false;
+        m_seekRequested.store(false, std::memory_order_release);
 
         // Arrêter le préchargement en cours si existant
         if (m_preloadRunning.load(std::memory_order_acquire)) {
@@ -1719,8 +1720,29 @@ void AudioEngine::setNextURI(const std::string& uri, const std::string& metadata
     std::cout << "[AudioEngine] Next URI queued (gapless)" << std::endl;
 }
 
+void AudioEngine::clearNextURI() {
+    // Match the audio thread's lock order (m_mutex -> m_pendingMutex) to avoid
+    // deadlocks while it applies a pending queue update.
+    std::lock_guard<std::mutex> lock(m_mutex);
+    {
+        std::lock_guard<std::mutex> pendingLock(m_pendingMutex);
+        m_pendingNextURI.clear();
+        m_pendingNextMetadata.clear();
+        m_pendingNextTrack.store(false, std::memory_order_release);
+    }
+    m_nextURI.clear();
+    m_nextMetadata.clear();
+    m_nextDecoder.reset();
+    m_formatChangePending.store(false, std::memory_order_release);
+    std::cout << "[AudioEngine] Gapless next URI cleared" << std::endl;
+}
+
 void AudioEngine::setTrackEndCallback(const TrackEndCallback& callback) {
     m_trackEndCallback = callback;
+}
+
+void AudioEngine::setSeekCompleteCallback(const SeekCompleteCallback& callback) {
+    m_seekCompleteCallback = callback;
 }
 
 bool AudioEngine::play() {
@@ -1775,6 +1797,7 @@ void AudioEngine::stop() {
 
     // Changer l'état SANS mutex (atomic)
     m_state.store(State::STOPPED);
+    m_seekRequested.store(false, std::memory_order_release);
 
     // Clear pending flags
     m_pendingNextTrack.store(false, std::memory_order_release);
@@ -1841,6 +1864,7 @@ bool AudioEngine::process(size_t samplesNeeded) {
     if (m_seekRequested.load(std::memory_order_acquire)) {
         double targetSeconds = m_seekTarget.load(std::memory_order_acquire);
         m_seekRequested.store(false, std::memory_order_release);
+        bool seekSucceeded = false;
 
         std::cout << "[AudioEngine] Processing async seek to " << targetSeconds << "s" << std::endl;
 
@@ -1875,10 +1899,15 @@ bool AudioEngine::process(size_t samplesNeeded) {
                     std::cout << "[AudioEngine] Seek completed to " << targetSeconds << "s" << std::endl;
                     DEBUG_LOG("[AudioEngine] Position updated to "
                               << m_samplesPlayed << " samples (" << targetSeconds << "s)");
+                    seekSucceeded = true;
                 } else {
                     std::cerr << "[AudioEngine] Seek failed in decoder" << std::endl;
                 }
             }
+        }
+
+        if (m_seekCompleteCallback) {
+            m_seekCompleteCallback(targetSeconds, seekSucceeded);
         }
 
         // Continue processing after seek

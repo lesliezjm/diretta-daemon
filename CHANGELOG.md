@@ -1,5 +1,17 @@
 # Changelog
 
+## [3.0.4] - 2026-07-15
+
+### Added
+- Added `clear_next` so queue owners can cancel or replace a daemon-side gapless preload after queue mutations.
+- Added `seek_complete` events emitted only after the audio thread has applied or rejected an asynchronous seek.
+
+### Changed
+- `seek` now rejects commands immediately when playback is not seekable instead of acknowledging an operation that cannot run.
+
+### Fixed
+- Cancelled queued asynchronous seeks when stopping or replacing the current URI so a stale request cannot move a newer track.
+
 ## [3.0.3] - 2026-04-23
 
 ### Added

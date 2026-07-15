@@ -6,7 +6,7 @@ JSON over Unix domain socket. Line-delimited messages (one JSON object per line,
 
 - **Multiple connections** can connect simultaneously
 - **All connections** can send: `discover_targets`, `status`, `acquire_control`, `release_control`
-- **Only one connection** at a time holds control (can send play/set_uri/queue_next/play_now/pause/stop/seek/select_target)
+- **Only one connection** at a time holds control (can send play/set_uri/queue_next/clear_next/play_now/pause/stop/seek/select_target)
 - **All connections** receive push notifications (state change, track change, position)
 
 ## Socket Path
@@ -196,6 +196,23 @@ Queue the next track for gapless/preloaded transition. Requires control.
 
 ---
 
+### `clear_next`
+
+Cancel any pending or already-preloaded next track. Requires control. Queue
+owners should send this when the current queue item no longer has a successor.
+
+**Request:**
+```json
+{"cmd":"clear_next"}
+```
+
+**Response:**
+```json
+{"ok":true}
+```
+
+---
+
 ### `play_now`
 
 Immediately replace current playback with a new track. Requires control.
@@ -259,6 +276,13 @@ Seek to a position in seconds. Requires control.
 **Response:**
 ```json
 {"ok":true}
+```
+
+The response confirms that the seek was accepted. Once the audio thread applies
+it, the daemon emits:
+
+```json
+{"event":"seek_complete","position":120.5,"ok":true}
 ```
 
 ---

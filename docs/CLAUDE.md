@@ -48,7 +48,7 @@ Diretta Target (DAC)
 **Socket:** `/tmp/diretta-renderer.sock` (configurable)
 
 Commands: `discover_targets`, `status`, `acquire_control`, `release_control`,
-`set_uri`, `queue_next`, `play`, `play_now`, `pause`, `stop`, `seek`,
+`set_uri`, `queue_next`, `clear_next`, `play`, `play_now`, `pause`, `stop`, `seek`,
 `select_target`, `shutdown`
 
 Full protocol: [docs/IPC_PROTOCOL.md](IPC_PROTOCOL.md)

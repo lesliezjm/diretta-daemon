@@ -271,6 +271,11 @@ For first playback, use `set_uri(path)` followed by `play` with no path. This ma
 
 For normal sequential playback, call `queue_next(path)` while the current track is still playing. The daemon still treats `play(path)` during active playback as `queue_next` for backward compatibility, but new clients should use the explicit command.
 
+If the application mutates its authoritative queue after preloading (remove,
+reorder, play-next, repeat/shuffle change), first send `clear_next`, commit the
+queue change, then preload the newly resolved successor. This prevents a track
+that is no longer next from being promoted at the current EOF.
+
 Use `play_now(path)` only for an immediate user-initiated replacement/skip, because it uses the stop/reopen transition path.
 
 ### 5. Seek
@@ -281,6 +286,17 @@ client.Send(map[string]interface{}{
     "position": 120.5, // seconds
 })
 ```
+
+The command response only confirms acceptance. Do not publish the requested
+position or merge it with an older maximum position yet. Wait for the matching
+audio-thread notification:
+
+```json
+{"event":"seek_complete","position":120.5,"ok":true}
+```
+
+Serialize seeks and match the completion position to the requested target so a
+late event from a timed-out request cannot acknowledge a newer seek.
 
 ### 6. Graceful Shutdown
 
@@ -303,7 +319,7 @@ client.Close()
    ← state_change: playing
    ← track_change: format info
    ← position: every 1s
-8. queue_next(path) for normal next-track preload, or play_now(path) for immediate replacement
+8. queue_next(path) for normal next-track preload; clear_next before queue mutations; play_now(path) for immediate replacement
 9. pause() / resume() / stop() / seek()
 10. select_target(2) → switch to different target
 11. release_control + close

@@ -29,11 +29,12 @@ public:
     using PlayCallback = std::function<bool(const std::string& path, const std::string& metadata)>;
     using SetUriCallback = std::function<bool(const std::string& path, const std::string& metadata)>;
     using QueueNextCallback = std::function<bool(const std::string& path, const std::string& metadata)>;
+    using ClearNextCallback = std::function<bool()>;
     using PlayNowCallback = std::function<bool(const std::string& path, const std::string& metadata)>;
     using ResumeCallback = std::function<void()>;
     using PauseCallback = std::function<void()>;
     using StopCallback = std::function<void()>;
-    using SeekCallback = std::function<void(double seconds)>;
+    using SeekCallback = std::function<bool(double seconds)>;
     using ShutdownCallback = std::function<void()>;
     using SelectTargetCallback = std::function<bool(int targetIndex)>;
 
@@ -55,6 +56,7 @@ public:
         PlayCallback onPlay;
         SetUriCallback onSetUri;
         QueueNextCallback onQueueNext;
+        ClearNextCallback onClearNext;
         PlayNowCallback onPlayNow;
         ResumeCallback onResume;
         PauseCallback onPause;
@@ -117,6 +119,7 @@ public:
     void notifyTrackChange(const std::string& path, uint32_t sampleRate, uint32_t bitDepth,
                            uint32_t channels, const std::string& format, double duration);
     void notifyPosition(double position, double duration);
+    void notifySeekComplete(double position, bool ok);
 
     void setCallbacks(const Callbacks& callbacks);
 

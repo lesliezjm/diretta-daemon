@@ -79,6 +79,7 @@ private:
     bool playPathLocked(const std::string& path, const std::string& metadata);
     bool setUriLocked(const std::string& path, const std::string& metadata, bool stopIfActive);
     bool queueNextLocked(const std::string& path, const std::string& metadata);
+    bool clearNextLocked();
     bool playCurrentLocked();
     bool replaceAndPlayLocked(const std::string& path, const std::string& metadata);
     void stopForUriChangeLocked();

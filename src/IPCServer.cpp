@@ -31,6 +31,7 @@ static constexpr char CMD_RELEASE_CONTROL[] = "release_control";
 static constexpr char CMD_PLAY[] = "play";
 static constexpr char CMD_SET_URI[] = "set_uri";
 static constexpr char CMD_QUEUE_NEXT[] = "queue_next";
+static constexpr char CMD_CLEAR_NEXT[] = "clear_next";
 static constexpr char CMD_PLAY_NOW[] = "play_now";
 static constexpr char CMD_PAUSE[] = "pause";
 static constexpr char CMD_STOP[] = "stop";
@@ -424,6 +425,16 @@ void IPCServer::processLine(int fd, const std::string& line) {
         } else {
             sendJson(fd, buildError("queue_next not available"));
         }
+    } else if (cmd == CMD_CLEAR_NEXT) {
+        if (m_callbacks.onClearNext) {
+            if (m_callbacks.onClearNext()) {
+                sendJson(fd, buildOk());
+            } else {
+                sendJson(fd, buildError("clear_next failed"));
+            }
+        } else {
+            sendJson(fd, buildError("clear_next not available"));
+        }
     } else if (cmd == CMD_PLAY_NOW) {
         std::string path = jsonGetString(line, "path");
         std::string metadata = jsonGetString(line, "metadata");
@@ -461,8 +472,11 @@ void IPCServer::processLine(int fd, const std::string& line) {
             return;
         }
         if (m_callbacks.onSeek) {
-            sendJson(fd, buildOk());
-            m_callbacks.onSeek(position);
+            if (m_callbacks.onSeek(position)) {
+                sendJson(fd, buildOk());
+            } else {
+                sendJson(fd, buildError("seek rejected"));
+            }
         } else {
             sendJson(fd, buildError("seek not available"));
         }
@@ -530,6 +544,13 @@ void IPCServer::notifyPosition(double position, double duration) {
         ::send(fd, json.c_str(), json.size(), MSG_NOSIGNAL | MSG_DONTWAIT);
         ::send(fd, "\n", 1, MSG_NOSIGNAL | MSG_DONTWAIT);
     }
+}
+
+void IPCServer::notifySeekComplete(double position, bool ok) {
+    char fields[160];
+    snprintf(fields, sizeof(fields),
+        "\"position\":%.1f,\"ok\":%s", position, ok ? "true" : "false");
+    broadcastBestEffort(buildEvent("seek_complete", fields));
 }
 
 void IPCServer::setCallbacks(const Callbacks& callbacks) {
