@@ -387,8 +387,24 @@ public:
      */
     void release();
 
+    /**
+     * @brief Drop an SDK session after the target disappears.
+     *
+     * Unlike release(), this does not wait for a graceful target response. It
+     * is used when isOnline() is already false so a restarted target can be
+     * discovered and selected without restarting the daemon.
+     */
+    void resetDisconnected();
+
+    /**
+     * @brief Re-discover and reopen the previously selected physical target.
+     * @return true when the target identity was found and the SDK reopened.
+     */
+    bool reconnectSelectedTarget();
+
     bool isOpen() const { return m_open; }
     bool isOnline() { return is_online(); }
+    int getSinkBitDepth() const { return m_sinkBitDepth.load(std::memory_order_acquire); }
 
     //=========================================================================
     // Playback Control
@@ -526,6 +542,7 @@ private:
     //=========================================================================
 
     bool discoverTarget(std::atomic<bool>* stopSignal = nullptr);
+    bool rediscoverSelectedTarget();
     bool measureMTU();
     bool openSyncConnection();
     bool openSDK();  // Helper: calls DIRETTA::Sync::open() with config params
@@ -546,6 +563,7 @@ private:
     unsigned int calculateCycleTime(uint32_t sampleRate, int channels, int bitsPerSample);
     void requestShutdownSilence(int buffers);
     bool waitForOnline(unsigned int timeoutMs);
+    void resetFailedConnection(const char* reason);
     void logSinkCapabilities();
 
     class ReconfigureGuard {

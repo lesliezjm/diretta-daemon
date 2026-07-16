@@ -46,7 +46,6 @@ namespace FlowControl {
     constexpr int MICROSLEEP_US = 500;                                    // 500µs micro-sleep (was 10ms)
     constexpr int MAX_WAIT_MS = 20;                                       // Max total wait time
     constexpr int MAX_RETRIES = MAX_WAIT_MS * 1000 / MICROSLEEP_US;       // 40 retries
-    constexpr float CRITICAL_BUFFER_LEVEL = 0.10f;                        // Early-return below 10%
 }
 
 //=============================================================================
@@ -127,8 +126,10 @@ IPCServer::StatusSnapshot DirettaRenderer::buildStatusSnapshot() {
     s.channels = info.channels;
     s.format = info.isDSD ? "DSD" : "PCM";
     s.dsdRate = info.isDSD ? info.dsdRate : 0;
-    s.bufferLevel = m_direttaSync ? m_direttaSync->getBufferLevel() : 0.0f;
     s.trackNumber = m_audioEngine->getTrackNumber();
+    s.sinkOnline = m_direttaSync && m_direttaSync->isOnline();
+    s.sinkBitDepth = s.sinkOnline ? m_direttaSync->getSinkBitDepth() : 0;
+    s.bufferLevel = s.sinkOnline ? m_direttaSync->getBufferLevel() : 0.0f;
 
     return s;
 }
@@ -207,6 +208,35 @@ bool DirettaRenderer::playCurrentLocked() {
         return false;
     }
 
+    // A target reboot invalidates the SDK session without changing the IPC
+    // connection to this daemon. Re-discover the same physical target identity
+    // so playback recovers without restarting the host process.
+    bool reconnected = false;
+    bool reopenDecoderAfterReconnect = false;
+    if (!m_direttaSync->isOnline()) {
+        std::cout << "[DirettaRenderer] Target offline - rediscovering and reconnecting" << std::endl;
+
+        auto engineState = m_audioEngine->getState();
+        reopenDecoderAfterReconnect = engineState == AudioEngine::State::PLAYING ||
+                                      engineState == AudioEngine::State::PAUSED;
+        if (reopenDecoderAfterReconnect) {
+            m_audioEngine->stop();
+            waitForCallbackComplete();
+        }
+
+        if (!m_direttaSync->reconnectSelectedTarget()) {
+            return false;
+        }
+        reconnected = true;
+    }
+
+    // The decoder may still be paused while the old SDK session has been
+    // discarded. Reopen the current URI so AudioEngine invokes the output
+    // callback instead of taking its decoder-only resume shortcut.
+    if (reconnected && reopenDecoderAfterReconnect) {
+        m_audioEngine->setCurrentURI(m_currentURI, m_currentMetadata, true);
+    }
+
     m_idleTimerActive.store(false, std::memory_order_release);
     m_direttaReleased.store(false, std::memory_order_release);
 
@@ -242,9 +272,45 @@ bool DirettaRenderer::playCurrentLocked() {
         if (m_ipc) m_ipc->notifyStateChange("stopped");
         return false;
     }
+    if (!waitForOutputReadyLocked()) {
+        std::cerr << "[DirettaRenderer] Playback output did not become ready" << std::endl;
+        cleanupFailedPlaybackLocked();
+        return false;
+    }
 
     if (m_ipc) m_ipc->notifyStateChange("playing");
     return true;
+}
+
+bool DirettaRenderer::waitForOutputReadyLocked() {
+    // Full format changes can rebuild the SDK connection before the normal
+    // online wait begins. Keep this below the API's 15 second command timeout.
+    constexpr auto OUTPUT_READY_TIMEOUT = std::chrono::seconds(12);
+    auto deadline = std::chrono::steady_clock::now() + OUTPUT_READY_TIMEOUT;
+
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (m_direttaSync->isPlaying() && m_direttaSync->isOnline()) {
+            return true;
+        }
+        if (m_audioEngine->getState() == AudioEngine::State::STOPPED) {
+            return false;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    return false;
+}
+
+void DirettaRenderer::cleanupFailedPlaybackLocked() {
+    if (m_audioEngine) {
+        m_audioEngine->stop();
+        waitForCallbackComplete();
+    }
+    if (m_direttaSync) {
+        m_direttaSync->release();
+    }
+    m_direttaReleased.store(true, std::memory_order_release);
+    m_idleTimerActive.store(false, std::memory_order_release);
+    if (m_ipc) m_ipc->notifyStateChange("stopped");
 }
 
 bool DirettaRenderer::replaceAndPlayLocked(const std::string& path, const std::string& metadata) {
@@ -504,6 +570,7 @@ bool DirettaRenderer::start(std::atomic<bool>* stopSignal) {
 
                     if (sent == 0) {
                         std::cerr << "[Callback] DSD timeout after " << retryCount << " retries" << std::endl;
+                        return false;
                     }
                 } else {
                     // PCM: Incremental send with hybrid flow control
@@ -511,10 +578,6 @@ bool DirettaRenderer::start(std::atomic<bool>* stopSignal) {
                     size_t remainingSamples = samples;
                     size_t bytesPerSample = (bitDepth == 24 || bitDepth == 32)
                         ? 4 * channels : (bitDepth / 8) * channels;
-
-                    // Hybrid flow control: micro-sleep normally, early-return if buffer critical
-                    float bufferLevel = m_direttaSync->getBufferLevel();
-                    bool criticalMode = (bufferLevel < FlowControl::CRITICAL_BUFFER_LEVEL);
 
                     int retryCount = 0;
 
@@ -527,15 +590,18 @@ bool DirettaRenderer::start(std::atomic<bool>* stopSignal) {
                             audioData += sent;
                             retryCount = 0;
                         } else {
-                            if (criticalMode) {
-                                // Buffer critically low - return immediately to prioritize refill
-                                DEBUG_LOG("[Audio] Early-return, buffer critical: " << bufferLevel);
-                                break;
-                            }
-                            // Normal backpressure: 500µs micro-sleep (was 10ms)
+                            // Backpressure or a short reconfiguration window. Never
+                            // report success for an unsent block: AudioEngine would
+                            // otherwise advance position and discard the samples.
                             std::this_thread::sleep_for(std::chrono::microseconds(FlowControl::MICROSLEEP_US));
                             retryCount++;
                         }
+                    }
+
+                    if (remainingSamples > 0) {
+                        std::cerr << "[Callback] PCM output unavailable after "
+                                  << retryCount << " retries" << std::endl;
+                        return false;
                     }
                 }
 
@@ -584,6 +650,13 @@ bool DirettaRenderer::start(std::atomic<bool>* stopSignal) {
 
         m_audioEngine->setTrackEndCallback([this]() {
             std::cout << "[DirettaRenderer] Track ended naturally" << std::endl;
+
+            // AudioEngine transitions to STOPPED before invoking this callback.
+            // Mark the following SDK shutdown as intentional before release()
+            // takes the sink offline, otherwise the audio thread can mistake a
+            // normal playlist end for a target disconnect.
+            m_direttaReleased.store(true, std::memory_order_release);
+            m_idleTimerActive.store(false, std::memory_order_release);
 
             if (m_direttaSync) {
                 // Wait for ring buffer to drain before stopping.
@@ -660,10 +733,10 @@ bool DirettaRenderer::start(std::atomic<bool>* stopSignal) {
             return replaceAndPlayLocked(path, metadata);
         };
 
-        ipcCallbacks.onResume = [this]() {
+        ipcCallbacks.onResume = [this]() -> bool {
             std::cout << "[DirettaRenderer] Resume" << std::endl;
             std::lock_guard<std::mutex> lock(m_mutex);
-            playCurrentLocked();
+            return playCurrentLocked();
         };
 
         ipcCallbacks.onPause = [this]() {
@@ -702,12 +775,15 @@ bool DirettaRenderer::start(std::atomic<bool>* stopSignal) {
 
             if (m_direttaSync && m_direttaSync->isOpen()) {
                 m_direttaSync->stopPlayback(false);
+                m_direttaSync->release();
             }
 
             if (m_ipc) m_ipc->notifyStateChange("stopped");
 
-            // Start idle release timer
-            m_idleTimerActive.store(true, std::memory_order_release);
+            // Explicit STOP must release the target immediately so another host
+            // can acquire it and so a subsequent target reboot starts cleanly.
+            m_direttaReleased.store(true, std::memory_order_release);
+            m_idleTimerActive.store(false, std::memory_order_release);
         };
 
         ipcCallbacks.onSeek = [this](double seconds) -> bool {
@@ -738,6 +814,7 @@ bool DirettaRenderer::start(std::atomic<bool>* stopSignal) {
         };
 
         ipcCallbacks.onSelectTarget = [this](int targetIndex) -> bool {
+            std::lock_guard<std::mutex> lock(m_mutex);
             return selectTarget(targetIndex);
         };
 
@@ -805,7 +882,9 @@ bool DirettaRenderer::selectTarget(int targetIndex, std::atomic<bool>* stopSigna
             m_lastStopTime = std::chrono::steady_clock::now();
             std::cout << "[DirettaRenderer] Warmup done" << std::endl;
         } else {
-            std::cerr << "[DirettaRenderer] Warmup failed (non-fatal)" << std::endl;
+            std::cerr << "[DirettaRenderer] Warmup failed - target is not ready" << std::endl;
+            m_direttaSync->disable();
+            return false;
         }
     }
 
@@ -912,6 +991,18 @@ void DirettaRenderer::audioThreadFunc() {
                 bool success = m_audioEngine->process(currentSamplesPerCall);
 
                 if (!success) {
+                    if (m_audioEngine->getState() == AudioEngine::State::STOPPED &&
+                        m_direttaSync && !m_direttaSync->isOnline() &&
+                        !m_direttaReleased.load(std::memory_order_acquire)) {
+                        std::unique_lock<std::mutex> lock(m_mutex, std::try_to_lock);
+                        if (lock.owns_lock()) {
+                            std::cerr << "[DirettaRenderer] Target disconnected during playback" << std::endl;
+                            m_direttaSync->resetDisconnected();
+                            m_direttaReleased.store(true, std::memory_order_release);
+                            m_idleTimerActive.store(false, std::memory_order_release);
+                            if (m_ipc) m_ipc->notifyStateChange("stopped");
+                        }
+                    }
                     // No data available from decoder, brief pause
                     std::this_thread::sleep_for(std::chrono::milliseconds(5));
                 } else if (bufferLevel < BUFFER_LOW_THRESHOLD && bufferLevel > 0.0f) {

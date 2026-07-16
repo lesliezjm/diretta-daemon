@@ -91,12 +91,17 @@ Query current playback state. Available to all connections.
     "format": "PCM",
     "dsdRate": 0,
     "bufferLevel": 0.73,
-    "trackNumber": 1
+    "trackNumber": 1,
+    "sinkOnline": true,
+    "sinkBitDepth": 24
   }
 }
 ```
 
 Transport states: `playing`, `paused`, `stopped`
+
+`sinkOnline` reports the SDK connection to the physical target, while
+`sinkBitDepth` reports the negotiated output depth (zero while offline).
 
 ---
 
@@ -228,6 +233,15 @@ not for normal sequential playlist preloading.
 **Response:**
 ```json
 {"ok":true}
+```
+
+The success response is sent only after the target is online and the output
+callback is ready. If the target rebooted, the daemon first drops the stale SDK
+session, rediscovers the selected target, and reconnects. A failed reconnect is
+reported synchronously:
+
+```json
+{"ok":false,"error":"play_now failed: target offline or output unavailable"}
 ```
 
 ---

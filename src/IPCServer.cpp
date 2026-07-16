@@ -379,7 +379,7 @@ void IPCServer::processLine(int fd, const std::string& line) {
                 if (m_callbacks.onPlay(path, metadata)) {
                     sendJson(fd, buildOk());
                 } else {
-                    sendJson(fd, buildError("play failed"));
+                    sendJson(fd, buildError("play failed: target offline or output unavailable"));
                 }
             } else {
                 sendJson(fd, buildError("play not available"));
@@ -387,8 +387,11 @@ void IPCServer::processLine(int fd, const std::string& line) {
         } else {
             // No path = resume from pause
             if (m_callbacks.onResume) {
-                sendJson(fd, buildOk());
-                m_callbacks.onResume();
+                if (m_callbacks.onResume()) {
+                    sendJson(fd, buildOk());
+                } else {
+                    sendJson(fd, buildError("resume failed: target offline or output unavailable"));
+                }
             } else {
                 sendJson(fd, buildError("resume not available"));
             }
@@ -446,7 +449,7 @@ void IPCServer::processLine(int fd, const std::string& line) {
             if (m_callbacks.onPlayNow(path, metadata)) {
                 sendJson(fd, buildOk());
             } else {
-                sendJson(fd, buildError("play_now failed"));
+                sendJson(fd, buildError("play_now failed: target offline or output unavailable"));
             }
         } else {
             sendJson(fd, buildError("play_now not available"));
@@ -608,10 +611,12 @@ std::string IPCServer::buildStatusJson(const StatusSnapshot& s) {
     snprintf(buf, sizeof(buf),
         "{\"transport\":\"%s\",\"path\":\"%s\",\"position\":%.1f,\"duration\":%.1f,"
         "\"sampleRate\":%u,\"bitDepth\":%u,\"channels\":%u,\"format\":\"%s\","
-        "\"dsdRate\":%d,\"bufferLevel\":%.2f,\"trackNumber\":%d}",
+        "\"dsdRate\":%d,\"bufferLevel\":%.2f,\"trackNumber\":%d,"
+        "\"sinkOnline\":%s,\"sinkBitDepth\":%d}",
         s.transport.c_str(), s.path.c_str(), s.position, s.duration,
         s.sampleRate, s.bitDepth, s.channels, s.format.c_str(),
-        s.dsdRate, s.bufferLevel, s.trackNumber);
+        s.dsdRate, s.bufferLevel, s.trackNumber,
+        s.sinkOnline ? "true" : "false", s.sinkBitDepth);
     return buf;
 }
 

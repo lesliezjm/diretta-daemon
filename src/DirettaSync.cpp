@@ -186,8 +186,10 @@ void DirettaSync::disable() {
 
     if (m_enabled) {
         shutdownWorker();
-        DIRETTA::Sync::close();
-        m_sdkOpen = false;
+        if (m_sdkOpen) {
+            DIRETTA::Sync::close();
+            m_sdkOpen = false;
+        }
         m_calculator.reset();
         m_enabled = false;
     }
@@ -387,6 +389,51 @@ bool DirettaSync::verifyTargetAvailable() {
     return found;
 }
 
+bool DirettaSync::rediscoverSelectedTarget() {
+    if (m_targetName.empty()) {
+        return false;
+    }
+
+    DIRETTA_LOG("Rediscovering selected target: " << m_targetName
+                << (m_targetOutput.empty() ? "" : " / " + m_targetOutput));
+
+    DIRETTA::Find::Setting findSettings;
+    findSettings.Loopback = false;
+    findSettings.ProductID = 0;
+    findSettings.Name = "DirettaRenderer";
+    findSettings.MyID = 0x44525400;
+
+    DIRETTA::Find find(findSettings);
+    if (!find.open()) {
+        return false;
+    }
+
+    DIRETTA::Find::PortResalts results;
+    bool foundAny = find.findOutput(results) && !results.empty();
+    find.close();
+    if (!foundAny) {
+        return false;
+    }
+
+    int index = 0;
+    for (const auto& entry : results) {
+        const auto& info = entry.second;
+        if (info.targetName == m_targetName &&
+            (m_targetOutput.empty() || info.outputName == m_targetOutput)) {
+            m_targetAddress = entry.first;
+            m_targetName = info.targetName;
+            m_targetOutput = info.outputName;
+            m_targetIndex = index;
+            DIRETTA_LOG("Rediscovered selected target at index " << (index + 1));
+            return true;
+        }
+        index++;
+    }
+
+    DIRETTA_LOG("Previously selected target was not found");
+    return false;
+}
+
 void DirettaSync::listTargets() {
     DIRETTA::Find::Setting findSettings;
     findSettings.Loopback = false;
@@ -529,6 +576,17 @@ bool DirettaSync::open(const AudioFormat& format) {
     if (!m_enabled) {
         std::cerr << "[DirettaSync] ERROR: Not enabled" << std::endl;
         return false;
+    }
+
+    // A target restart leaves the SDK object open with a stale connection
+    // state. Never take the same-format quick-resume path in that state: tear
+    // the session down, rediscover the target (its address may have changed),
+    // and reopen the SDK in-process.
+    if (m_open && !is_online()) {
+        if (!reconnectSelectedTarget()) {
+            std::cerr << "[DirettaSync] ERROR: Target is still offline" << std::endl;
+            return false;
+        }
     }
 
     // Reopen SDK if it was released (e.g., after playlist end)
@@ -869,7 +927,9 @@ bool DirettaSync::open(const AudioFormat& format) {
     play();
 
     if (!waitForOnline(m_config.onlineWaitMs)) {
-        DIRETTA_LOG("WARNING: Did not come online within timeout");
+        std::cerr << "[DirettaSync] ERROR: Target did not come online within timeout" << std::endl;
+        resetFailedConnection("online timeout");
+        return false;
     }
 
     m_postOnlineDelayDone = false;
@@ -903,16 +963,20 @@ void DirettaSync::close() {
     m_transitionWakeup.store(true, std::memory_order_release);
     m_transitionCv.notify_all();
 
-    // Request shutdown silence
-    requestShutdownSilence(m_isDsdMode.load(std::memory_order_acquire) ? 50 : 20);
+    // Request shutdown silence only while the SDK is still playing. Explicit
+    // STOP already sent its tail before release(), so waiting here would only
+    // add a guaranteed timeout with no worker consuming the request.
+    if (m_playing && is_online()) {
+        requestShutdownSilence(m_isDsdMode.load(std::memory_order_acquire) ? 50 : 20);
 
-    auto start = std::chrono::steady_clock::now();
-    while (m_silenceBuffersRemaining.load(std::memory_order_acquire) > 0) {
-        if (std::chrono::steady_clock::now() - start > std::chrono::milliseconds(150)) {
-            DIRETTA_LOG("Silence timeout");
-            break;
+        auto start = std::chrono::steady_clock::now();
+        while (m_silenceBuffersRemaining.load(std::memory_order_acquire) > 0) {
+            if (std::chrono::steady_clock::now() - start > std::chrono::milliseconds(150)) {
+                DIRETTA_LOG("Silence timeout");
+                break;
+            }
+            std::this_thread::yield();
         }
-        std::this_thread::yield();
     }
 
     m_stopRequested = true;
@@ -947,6 +1011,14 @@ void DirettaSync::release() {
 
     std::cout << "[DirettaSync] Release() - fully releasing target" << std::endl;
 
+    // A powered-off/rebooting target cannot acknowledge the graceful
+    // disconnect used by close(). Force-close the local SDK session instead so
+    // the daemon does not retain a stale connection until process restart.
+    if ((m_open || m_sdkOpen) && !is_online()) {
+        resetFailedConnection("release while target offline");
+        return;
+    }
+
     // First do a normal close if still open
     if (m_open) {
         close();
@@ -974,6 +1046,76 @@ void DirettaSync::release() {
 
     // v2.0.1 FIX: Reset cached consumer generation to force reload on next getNewStream()
     m_cachedConsumerGen = UINT32_MAX;
+}
+
+void DirettaSync::resetDisconnected() {
+    std::lock_guard<std::recursive_mutex> lifecycleLock(m_lifecycleMutex);
+    if (is_online()) {
+        return;
+    }
+    resetFailedConnection("target disconnected during playback");
+}
+
+bool DirettaSync::reconnectSelectedTarget() {
+    std::lock_guard<std::recursive_mutex> lifecycleLock(m_lifecycleMutex);
+    if (is_online()) {
+        return true;
+    }
+
+    resetFailedConnection("reconnect selected target");
+    if (!rediscoverSelectedTarget()) {
+        return false;
+    }
+    if (!measureMTU()) {
+        DIRETTA_LOG("MTU measurement failed during reconnect, using fallback");
+    }
+    m_calculator = std::make_unique<DirettaCycleCalculator>(m_effectiveMTU);
+    if (!openSyncConnection()) {
+        return false;
+    }
+
+    m_isFirstConnect = true;
+    return true;
+}
+
+void DirettaSync::resetFailedConnection(const char* reason) {
+    DIRETTA_LOG("Resetting failed connection: " << reason);
+
+    m_openAbortRequested.store(true, std::memory_order_release);
+    m_transitionWakeup.store(true, std::memory_order_release);
+    m_transitionCv.notify_all();
+    m_stopRequested.store(true, std::memory_order_release);
+    m_draining.store(false, std::memory_order_release);
+
+    if (m_sdkOpen) {
+        // Do not wait for an acknowledgement from a target that is known to be
+        // offline. Closing the SDK first also unblocks syncWorker() on SDK 148.
+        stop();
+        disconnect(false);
+        DIRETTA::Sync::close();
+        m_sdkOpen = false;
+    }
+    joinWorkerWithTimeout(1000);
+
+    {
+        std::lock_guard<std::mutex> configLock(m_configMutex);
+        ReconfigureGuard guard(*this);
+        m_ringBuffer.clear();
+        m_prefillComplete = false;
+        m_postOnlineDelayDone = false;
+        m_rebuffering.store(false, std::memory_order_relaxed);
+        m_silenceBuffersRemaining = 0;
+    }
+
+    m_open = false;
+    m_playing = false;
+    m_paused = false;
+    m_hasPreviousFormat = false;
+    m_sinkBitDepth = 0;
+    m_cachedConsumerGen = UINT32_MAX;
+    m_openAbortRequested.store(false, std::memory_order_release);
+    m_transitionWakeup.store(false, std::memory_order_release);
+    DIRETTA_LOG("Failed connection reset complete");
 }
 
 bool DirettaSync::reopenForFormatChange() {

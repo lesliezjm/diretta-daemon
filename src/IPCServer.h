@@ -31,7 +31,7 @@ public:
     using QueueNextCallback = std::function<bool(const std::string& path, const std::string& metadata)>;
     using ClearNextCallback = std::function<bool()>;
     using PlayNowCallback = std::function<bool(const std::string& path, const std::string& metadata)>;
-    using ResumeCallback = std::function<void()>;
+    using ResumeCallback = std::function<bool()>;
     using PauseCallback = std::function<void()>;
     using StopCallback = std::function<void()>;
     using SeekCallback = std::function<bool(double seconds)>;
@@ -83,6 +83,8 @@ public:
         int dsdRate = 0;
         float bufferLevel = 0.0f;
         int trackNumber = 0;
+        bool sinkOnline = false;
+        int sinkBitDepth = 0;
     };
 
     using StatusProvider = std::function<StatusSnapshot()>;

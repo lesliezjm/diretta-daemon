@@ -81,6 +81,8 @@ private:
     bool queueNextLocked(const std::string& path, const std::string& metadata);
     bool clearNextLocked();
     bool playCurrentLocked();
+    bool waitForOutputReadyLocked();
+    void cleanupFailedPlaybackLocked();
     bool replaceAndPlayLocked(const std::string& path, const std::string& metadata);
     void stopForUriChangeLocked();
 
